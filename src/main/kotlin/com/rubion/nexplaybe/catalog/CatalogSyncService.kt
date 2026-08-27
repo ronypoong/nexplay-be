@@ -114,12 +114,24 @@ class CatalogSyncService(
         }
     }
 
+    // 이전 구현은 첫 항목 하나가 실패하면 나머지를 통째로 건너뛰었다. 첫 항목은 Wikidata 응답 순서라
+    // 사실상 무작위이므로, steamAppId 가 없는 항목은 예산을 쓰지 않고 넘기고
+    // Steam 자체가 죽은 경우만 연속 실패로 판단해 중단한다.
     private fun enrichNewItemsFromSteam(items: List<CatalogGameItem>): List<CatalogGameItem> {
-        val first = items.firstOrNull() ?: return emptyList()
-        val firstMetadata = first.steamAppId?.let(steamStoreClient::fetchDetails) ?: return items
-        val enriched = linkedMapOf(first.wikidataId to applyStoreMetadata(first, firstMetadata))
-        items.drop(1).take(MAX_STEAM_DETAILS_PER_SYNC - 1).forEach { item ->
-            val metadata = item.steamAppId?.let(steamStoreClient::fetchDetails) ?: return@forEach
+        if (items.isEmpty()) return emptyList()
+        val enriched = linkedMapOf<String, CatalogGameItem>()
+        var budget = MAX_STEAM_DETAILS_PER_SYNC
+        var consecutiveFailures = 0
+        for (item in items) {
+            if (budget <= 0 || consecutiveFailures >= STEAM_FAILURE_CUTOFF) break
+            val appId = item.steamAppId ?: continue
+            budget--
+            val metadata = runCatching { steamStoreClient.fetchDetails(appId) }.getOrNull()
+            if (metadata == null) {
+                consecutiveFailures++
+                continue
+            }
+            consecutiveFailures = 0
             enriched[item.wikidataId] = applyStoreMetadata(item, metadata)
         }
         return items.map { enriched[it.wikidataId] ?: it }
@@ -158,13 +170,16 @@ class CatalogSyncService(
         var enriched = 0
         fetched.forEach { (game, metadata) ->
             if (metadata == null) return@forEach
+            val platformsBefore = game.platforms.toSet()
             val hadUnknownPlatform = game.platforms.isEmpty() || game.platforms.all { it == "미정" }
             if (metadata.genres.isNotEmpty()) {
                 game.genres.clear()
                 game.genres.addAll(metadata.genres)
             }
+            // Steam 스토어는 windows/mac/linux 만 알 수 있어 결과가 항상 "PC" 하나다.
+            // 여기서 clear 하면 Wikidata 가 채운 PS5·Xbox·Switch 2 가 지워지므로 병합만 한다.
             if (metadata.platforms.isNotEmpty()) {
-                game.platforms.clear()
+                if (hadUnknownPlatform) game.platforms.clear()
                 game.platforms.addAll(metadata.platforms)
             }
             if (metadata.gameModes.isNotEmpty()) {
@@ -172,11 +187,7 @@ class CatalogSyncService(
                 game.gameModes.addAll(metadata.gameModes)
             }
             gameRepository.save(game)
-            val releaseDate = game.releaseDate
-            if (hadUnknownPlatform && metadata.platforms.isNotEmpty() && releaseDate != null) {
-                releaseRepository.deleteAllByGameId(game.id)
-                metadata.platforms.forEach { platform -> releaseRepository.save(toRelease(game, platform, releaseDate)) }
-            }
+            syncReleases(game, platformsBefore)
             enriched++
         }
         return StoreEnrichmentSummary("SUCCESS", candidates.size, enriched, candidates.size - enriched)
@@ -198,7 +209,7 @@ class CatalogSyncService(
         var enriched = 0
         candidates.forEach { game ->
             val classification = classifications[game.wikidataId] ?: return@forEach
-            val hadUnknownPlatform = game.platforms.isEmpty() || game.platforms.all { it == "미정" }
+            val platformsBefore = game.platforms.toSet()
             var changed = false
             if (classification.genres.isNotEmpty()) {
                 if (game.genres.all { it == "2026 신작" || it == "미분류" }) game.genres.clear()
@@ -216,14 +227,19 @@ class CatalogSyncService(
             }
             if (!changed) return@forEach
             gameRepository.save(game)
-            val releaseDate = game.releaseDate
-            if (hadUnknownPlatform && classification.platforms.isNotEmpty() && releaseDate != null) {
-                releaseRepository.deleteAllByGameId(game.id)
-                classification.platforms.forEach { platform -> releaseRepository.save(toRelease(game, platform, releaseDate)) }
-            }
+            syncReleases(game, platformsBefore)
             enriched++
         }
         return ClassificationEnrichmentSummary("SUCCESS", candidates.size, enriched, candidates.size - enriched)
+    }
+
+    // 플랫폼 집합이 바뀌면 release 행도 같이 맞춘다.
+    // 예전에는 "미정" 이었던 경우에만 다시 만들어서 game.platforms 와 release.platform 이 어긋났다.
+    private fun syncReleases(game: Game, platformsBefore: Set<String>) {
+        val releaseDate = game.releaseDate ?: return
+        if (game.platforms == platformsBefore) return
+        releaseRepository.deleteAllByGameId(game.id)
+        game.platforms.forEach { platform -> releaseRepository.save(toRelease(game, platform, releaseDate)) }
     }
 
     private fun resolveCompany(ref: CatalogCompanyRef?, type: CompanyType): Pair<Company, Int> {
@@ -320,5 +336,6 @@ class CatalogSyncService(
         val FEATURED_APP_IDS = setOf(3764200L, 3357650L, 2483190L, 2362060L, 2499860L, 2288340L)
         const val MAX_MAGAZINE_SUBSCRIPTIONS = 50
         const val MAX_STEAM_DETAILS_PER_SYNC = 24
+        const val STEAM_FAILURE_CUTOFF = 5
     }
 }

@@ -122,11 +122,16 @@ class SteamStoreClient(
         }
     }
 
-    private fun parseLanguages(raw: String): List<SteamLanguageSupport> = raw.split(',').mapNotNull { segment ->
-        val audio = segment.contains("*") || segment.contains("<strong>")
-        val name = segment.replace(Regex("<[^>]+>"), "").replace("*", "").trim()
-        if (name.isBlank()) null else SteamLanguageSupport(languageCode(name), name, true, audio)
-    }.distinctBy { it.code }
+    // supported_languages 는 목록 뒤에 "<br><strong>*</strong>음성이 지원되는 언어" 각주가 붙어 온다.
+    // 각주를 떼지 않으면 쉼표 분리 시 마지막 언어에 각주가 들러붙어 이름과 음성 지원 여부가 모두 망가진다.
+    internal fun parseLanguages(raw: String): List<SteamLanguageSupport> = raw
+        .split(FOOTNOTE_SEPARATOR, limit = 2).first()
+        .split(',')
+        .mapNotNull { segment ->
+            val audio = segment.contains("*") || segment.contains("<strong>", ignoreCase = true)
+            val name = segment.replace(Regex("<[^>]+>"), "").replace("*", "").trim()
+            if (name.isBlank()) null else SteamLanguageSupport(languageCode(name), name, true, audio)
+        }.distinctBy { it.code }
 
     private fun languageCode(name: String): String = when (name.lowercase()) {
         "한국어", "korean" -> "ko"
@@ -136,11 +141,34 @@ class SteamStoreClient(
         "중국어 번체", "traditional chinese" -> "zh-TW"
         "프랑스어", "french" -> "fr"
         "독일어", "german" -> "de"
-        "스페인어", "spanish - spain" -> "es"
+        "스페인어", "스페인어 - 스페인", "spanish - spain" -> "es"
+        "스페인어 - 중남미", "spanish - latin america" -> "es-419"
+        "포르투갈어 - 브라질", "portuguese - brazil" -> "pt-BR"
+        "포르투갈어", "portuguese", "포르투갈어 - 포르투갈", "portuguese - portugal" -> "pt"
+        "러시아어", "russian" -> "ru"
+        "폴란드어", "polish" -> "pl"
+        "이탈리아어", "italian" -> "it"
+        "태국어", "thai" -> "th"
+        "아랍어", "arabic" -> "ar"
+        "체코어", "czech" -> "cs"
+        "터키어", "turkish" -> "tr"
+        "네덜란드어", "dutch" -> "nl"
+        "우크라이나어", "ukrainian" -> "uk"
+        "베트남어", "vietnamese" -> "vi"
+        "헝가리어", "hungarian" -> "hu"
+        "덴마크어", "danish" -> "da"
+        "핀란드어", "finnish" -> "fi"
+        "노르웨이어", "norwegian" -> "no"
+        "스웨덴어", "swedish" -> "sv"
+        "그리스어", "greek" -> "el"
+        "루마니아어", "romanian" -> "ro"
+        "불가리아어", "bulgarian" -> "bg"
+        "인도네시아어", "indonesian" -> "id"
         else -> name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "lang-${name.hashCode().toUInt()}" }
     }
 
     private companion object {
+        val FOOTNOTE_SEPARATOR = Regex("(?i)<br\\s*/?>")
         val NON_GENRE_LABELS = setOf("무료 플레이", "Free to Play", "앞서 해보기", "Early Access")
         val ACCESSIBILITY_KEYWORDS = setOf("자막", "색상", "색맹", "음량", "볼륨", "카메라", "텍스트", "난이도", "subtitles", "color", "volume", "camera", "text size", "difficulty")
     }

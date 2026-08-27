@@ -1,6 +1,9 @@
 spring:
   application:
     name: nexplay-be
+  # 프로젝트 루트의 .env 를 있으면 읽는다(없어도 기동). 로컬에서는 이 파일로 DB 계정을 넘긴다.
+  config:
+    import: "optional:file:./.env[.properties]"
   datasource:
     url: ${NEXPLAY_DB_URL:jdbc:mysql://127.0.0.1:3306/nexplay?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Seoul}
     username: ${NEXPLAY_DB_USERNAME}
@@ -33,6 +36,8 @@ management:
       show-details: always
 
 nexplay:
+  cors:
+    allowed-origins: "${NEXPLAY_CORS_ALLOWED_ORIGINS:http://localhost:3003,http://127.0.0.1:3003}"
   daily-sync:
     cron: ${NEXPLAY_DAILY_SYNC_CRON:0 0 6 * * *}
     zone: ${NEXPLAY_DAILY_SYNC_ZONE:Asia/Seoul}

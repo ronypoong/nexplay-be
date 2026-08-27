@@ -53,15 +53,30 @@ class SteamNewsRssClient(
             val guid = element.text("guid").trim().ifBlank { url }
             val summary = element.text("description").toPlainText().take(600)
             if (title.isBlank() || url.isBlank()) return@mapNotNull null
-            val publishedAt = runCatching {
-                ZonedDateTime.parse(element.text("pubDate").trim(), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()
-            }.getOrElse { Instant.now() }
+            // 예전에는 파싱 실패 시 Instant.now() 를 넣어 몇 년 전 뉴스가 "방금 전" 으로 뜨고
+            // 이벤트 병합 기준일(±1일)까지 어긋났다. 날짜를 지어내느니 건너뛰고 다음 수집에서 다시 시도한다.
+            val publishedAt = parsePublishedAt(element.text("pubDate").trim()) ?: return@mapNotNull null
             SteamNewsItem(guid, title.take(500), url, publishedAt, summary)
         }.take(20)
+    }
+
+    private fun parsePublishedAt(raw: String): Instant? {
+        if (raw.isBlank()) return null
+        return DATE_FORMATS.firstNotNullOfOrNull { format ->
+            runCatching { ZonedDateTime.parse(raw, format).toInstant() }.getOrNull()
+        }
     }
 
     private fun Element.text(tag: String): String = getElementsByTagName(tag).item(0)?.textContent.orEmpty()
     private fun String.toPlainText(): String = replace(Regex("<[^>]+>"), " ")
         .replace("&nbsp;", " ").replace("&amp;", "&").replace("&quot;", "\"")
         .replace("&#39;", "'").replace(Regex("\\s+"), " ").trim()
+
+    private companion object {
+        val DATE_FORMATS = listOf(
+            DateTimeFormatter.RFC_1123_DATE_TIME,
+            DateTimeFormatter.ISO_ZONED_DATE_TIME,
+            DateTimeFormatter.ISO_OFFSET_DATE_TIME,
+        )
+    }
 }

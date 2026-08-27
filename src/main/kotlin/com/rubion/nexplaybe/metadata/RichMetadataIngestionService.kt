@@ -7,7 +7,7 @@ import com.rubion.nexplaybe.game.Game
 import com.rubion.nexplaybe.game.GameRepository
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Timestamp
 import java.time.Instant
 
@@ -19,7 +19,10 @@ class RichMetadataIngestionService(
     private val steam: SteamStoreClient,
     private val wikidata: WikidataCatalogClient,
     private val jdbc: JdbcTemplate,
+    private val transactions: TransactionTemplate,
 ) {
+
+    private data class SteamGameRef(val id: Long, val title: String, val officialUrl: String?)
     fun enrichFromSteam(limit: Int = 12): RichMetadataSyncSummary {
         val candidateIds = jdbc.queryForList(
             """
@@ -27,27 +30,40 @@ class RichMetadataIngestionService(
               NOT EXISTS (SELECT 1 FROM game_data_provenance p WHERE p.game_id=g.id AND p.field_name='extended_metadata_checked' AND p.source_name='Steam Store')
             ORDER BY g.featured DESC, g.discovery_score DESC LIMIT ?
             """.trimIndent(), Long::class.java, limit.coerceIn(1, 50),
-        )
-        val games = gameRepository.findAllForDiscovery().associateBy { it.id }
-        val candidates = candidateIds.mapNotNull(games::get)
+        ).filterNotNull()
+        if (candidateIds.isEmpty()) return RichMetadataSyncSummary("SUCCESS", 0, 0, 0)
+        val candidates = gameRepository.findAllForDiscoveryByIds(candidateIds)
         if (candidates.isEmpty()) return RichMetadataSyncSummary("SUCCESS", 0, 0, 0)
 
-        // Steam이 제한 응답을 보내면 첫 요청에서 바로 중단해 불필요한 재시도를 피한다.
-        val first = runCatching { steam.fetchDetails(requireNotNull(candidates.first().steamAppId)) }.getOrNull()
-            ?: return RichMetadataSyncSummary("SKIPPED_SOURCE_UNAVAILABLE", candidates.size, 0, candidates.size)
+        // DLC 연결에 쓰는 appId -> 게임 대응표. 예전에는 게임 1건마다 카탈로그 전체를 다시 읽었다.
+        val bySteamAppId = steamGameRefs()
+        // Steam 이 실제로 죽었을 때만 중단한다. 특정 앱 하나가 지역 제한이나 삭제 상태여도 나머지는 계속 진행한다.
+        var consecutiveFailures = 0
         var enriched = 0
-        candidates.forEachIndexed { index, game ->
-            val metadata = if (index == 0) first else runCatching { steam.fetchDetails(requireNotNull(game.steamAppId)) }.getOrNull()
-            if (metadata != null) {
-                persistSteamMetadata(game, metadata)
-                enriched++
+        for (game in candidates) {
+            if (consecutiveFailures >= STEAM_FAILURE_CUTOFF) break
+            val metadata = runCatching { steam.fetchDetails(requireNotNull(game.steamAppId)) }.getOrNull()
+            if (metadata == null) {
+                consecutiveFailures++
+                continue
             }
+            consecutiveFailures = 0
+            // persistSteamMetadata 는 같은 빈의 메서드라 @Transactional 자기호출이 프록시를 우회한다.
+            // 8개 테이블 쓰기가 각각 auto-commit 되지 않도록 트랜잭션을 여기서 명시적으로 연다.
+            transactions.execute { persistSteamMetadata(game, metadata, bySteamAppId) }
+            enriched++
+        }
+        if (enriched == 0 && consecutiveFailures >= STEAM_FAILURE_CUTOFF) {
+            return RichMetadataSyncSummary("SKIPPED_SOURCE_UNAVAILABLE", candidates.size, 0, candidates.size)
         }
         return RichMetadataSyncSummary("SUCCESS", candidates.size, enriched, candidates.size - enriched)
     }
 
-    @Transactional
-    fun persistSteamMetadata(game: Game, data: SteamStoreMetadata) {
+    private fun steamGameRefs(): Map<Long, SteamGameRef> = jdbc.query(
+        "SELECT steam_app_id, id, title, official_url FROM game WHERE steam_app_id IS NOT NULL",
+    ) { rs, _ -> rs.getLong(1) to SteamGameRef(rs.getLong(2), rs.getString(3), rs.getString(4)) }.toMap()
+
+    private fun persistSteamMetadata(game: Game, data: SteamStoreMetadata, bySteamAppId: Map<Long, SteamGameRef>) {
         val appId = requireNotNull(game.steamAppId)
         val sourceUrl = "https://store.steampowered.com/app/$appId"
         val now = Timestamp.from(Instant.now())
@@ -56,8 +72,9 @@ class RichMetadataIngestionService(
             game.gameModes.addAll(data.gameModes)
         }
         val korean = data.languages.find { it.code == "ko" }
-        game.koreanTextSupported = korean?.text
-        game.koreanAudioSupported = korean?.audio
+        // 언어 목록을 읽어냈는데 한국어가 없으면 "확인 중"(null)이 아니라 "미지원"(false)이다.
+        game.koreanTextSupported = if (data.languages.isEmpty()) null else korean != null
+        game.koreanAudioSupported = if (data.languages.isEmpty()) null else korean?.audio ?: false
         gameRepository.save(game)
 
         data.languages.forEach { language ->
@@ -104,8 +121,7 @@ class RichMetadataIngestionService(
                 game.id, feature, sourceUrl, now,
             )
         }
-        val bySteamId = gameRepository.findAllForDiscovery().filter { it.steamAppId != null }.associateBy { it.steamAppId }
-        data.dlcAppIds.mapNotNull(bySteamId::get).forEach { related ->
+        data.dlcAppIds.mapNotNull(bySteamAppId::get).forEach { related ->
             jdbc.update(
                 """INSERT INTO game_relation (game_id,related_game_id,relation_type,external_title,external_url,source_name,verified_at)
                 VALUES (?,?,'DLC',?,?, 'Steam Store',?) ON DUPLICATE KEY UPDATE verified_at=VALUES(verified_at)""",
@@ -129,23 +145,33 @@ class RichMetadataIngestionService(
     )
 
     fun enrichWikidataRelations(): RichMetadataSyncSummary {
-        val games = gameRepository.findAllForDiscovery()
-        val byWikidata = games.filter { it.wikidataId != null }.associateBy { it.wikidataId }
-        val relations = runCatching { wikidata.fetchRelations(byWikidata.keys.filterNotNull()) }
+        val byWikidata = jdbc.query(
+            "SELECT wikidata_id, id FROM game WHERE wikidata_id IS NOT NULL",
+        ) { rs, _ -> rs.getString(1) to rs.getLong(2) }.toMap()
+        if (byWikidata.isEmpty()) return RichMetadataSyncSummary("SUCCESS", 0, 0, 0)
+        val relations = runCatching { wikidata.fetchRelations(byWikidata.keys) }
             .getOrElse { return RichMetadataSyncSummary("FAILED", byWikidata.size, 0, byWikidata.size) }
+        var enriched = 0
         relations.groupBy { it.gameId }.forEach { (gameWikidataId, items) ->
-            val game = byWikidata[gameWikidataId] ?: return@forEach
-            jdbc.update("DELETE FROM game_relation WHERE game_id=? AND source_name='Wikidata'", game.id)
-            items.forEach { relation ->
-                val related = byWikidata[relation.relatedId]
-                jdbc.update(
-                    """INSERT INTO game_relation (game_id,related_game_id,relation_type,external_title,external_url,source_name,verified_at)
-                    VALUES (?,?,?,?,?,'Wikidata',?)""",
-                    game.id, related?.id, relation.type, relation.relatedTitle,
-                    "https://www.wikidata.org/wiki/${relation.relatedId}", Timestamp.from(Instant.now()),
-                )
+            val gameId = byWikidata[gameWikidataId] ?: return@forEach
+            // DELETE 와 INSERT 가 갈라지면 중간에 죽었을 때 관계가 통째로 사라진다.
+            transactions.execute {
+                jdbc.update("DELETE FROM game_relation WHERE game_id=? AND source_name='Wikidata'", gameId)
+                items.forEach { relation ->
+                    jdbc.update(
+                        """INSERT INTO game_relation (game_id,related_game_id,relation_type,external_title,external_url,source_name,verified_at)
+                        VALUES (?,?,?,?,?,'Wikidata',?)""",
+                        gameId, byWikidata[relation.relatedId], relation.type, relation.relatedTitle,
+                        "https://www.wikidata.org/wiki/${relation.relatedId}", Timestamp.from(Instant.now()),
+                    )
+                }
             }
+            enriched++
         }
-        return RichMetadataSyncSummary("SUCCESS", byWikidata.size, relations.size, 0)
+        return RichMetadataSyncSummary("SUCCESS", byWikidata.size, enriched, 0)
+    }
+
+    private companion object {
+        const val STEAM_FAILURE_CUTOFF = 5
     }
 }

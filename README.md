@@ -7,11 +7,13 @@ NEXPLAY MVP용 Kotlin + Spring Boot 4.1 + MySQL API입니다. 실제 게임 카�
 MySQL `127.0.0.1:3306`이 실행 중인 상태에서:
 
 ```bash
-NEXPLAY_DB_USERNAME=nexplay_user NEXPLAY_DB_PASSWORD=<로컬_비밀번호> \
-  GRADLE_USER_HOME=.gradle ./gradlew bootRun
+cp .env.example .env   # 최초 1회, NEXPLAY_DB_PASSWORD 를 실제 값으로 수정
+GRADLE_USER_HOME=.gradle ./gradlew bootRun
 ```
 
-DB 계정 정보는 기본값이 없으므로 반드시 환경 변수로 넘겨야 합니다.
+DB 계정 정보는 코드에 기본값이 없습니다. `application.yaml` 의
+`spring.config.import` 가 프로젝트 루트의 `.env` 를 읽으므로 위처럼 파일로 넘기거나,
+환경 변수로 직접 넘겨도 됩니다. `.env` 는 `.gitignore` 에 들어 있습니다.
 
 기본 API 주소는 `http://localhost:4004`입니다. 시작 시 Flyway가 schema와 기준 데이터를 적용합니다.
 
@@ -25,6 +27,7 @@ DB 계정 정보는 기본값이 없으므로 반드시 환경 변수로 넘겨�
 | `SERVER_PORT` | `4004` |
 | `NEXPLAY_DAILY_SYNC_CRON` | `0 0 6 * * *` |
 | `NEXPLAY_DAILY_SYNC_ZONE` | `Asia/Seoul` |
+| `NEXPLAY_CORS_ALLOWED_ORIGINS` | `http://localhost:3003,http://127.0.0.1:3003` |
 
 운영 환경에서는 DB 접속 정보와 관리 API 보호 설정을 별도로 구성해야 합니다.
 

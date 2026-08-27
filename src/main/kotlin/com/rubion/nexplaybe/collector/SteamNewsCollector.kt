@@ -28,13 +28,15 @@ class SteamNewsCollector(
 
     fun collect(): CollectorSummary {
         if (!running.compareAndSet(false, true)) return CollectorSummary("SKIPPED_ALREADY_RUNNING", 0, 0, 0, 0, emptyList())
+        var run: CollectorRun? = null
         try {
             val source = sourceRepository.findBySlug("steam-news-rss")
                 ?: return CollectorSummary("SKIPPED_SOURCE_MISSING", 0, 0, 0, 0, emptyList())
             if (!source.active || source.policyStatus != PolicyStatus.ALLOWED) {
                 return CollectorSummary("SKIPPED_SOURCE_DISABLED", 0, 0, 0, 0, emptyList())
             }
-            val run = collectorRunRepository.save(CollectorRun(source = source, startedAt = Instant.now()))
+            val started = collectorRunRepository.save(CollectorRun(source = source, startedAt = Instant.now()))
+            run = started
             val subscriptions = subscriptionRepository.findAllByActiveTrueOrderByIdAsc().filter { it.source.id == source.id }
             var fetched = 0
             var newItems = 0
@@ -49,14 +51,24 @@ class SteamNewsCollector(
                     newEvents += result.newEvents
                 }.onFailure { errors += "${subscription.game.title}: ${it.message.orEmpty().take(300)}" }
             }
-            run.finishedAt = Instant.now()
-            run.fetchedCount = fetched
-            run.newItemCount = newItems
-            run.eventCount = newEvents
-            run.status = when { errors.isEmpty() -> CollectorRunStatus.SUCCESS; errors.size < subscriptions.size -> CollectorRunStatus.PARTIAL_FAILURE; else -> CollectorRunStatus.FAILED }
-            run.errorMessage = errors.joinToString(" | ").take(1000).ifBlank { null }
-            collectorRunRepository.save(run)
-            return CollectorSummary(run.status.name, subscriptions.size, fetched, newItems, newEvents, errors)
+            started.finishedAt = Instant.now()
+            started.fetchedCount = fetched
+            started.newItemCount = newItems
+            started.eventCount = newEvents
+            started.status = when { errors.isEmpty() -> CollectorRunStatus.SUCCESS; errors.size < subscriptions.size -> CollectorRunStatus.PARTIAL_FAILURE; else -> CollectorRunStatus.FAILED }
+            started.errorMessage = errors.joinToString(" | ").take(1000).ifBlank { null }
+            collectorRunRepository.save(started)
+            return CollectorSummary(started.status.name, subscriptions.size, fetched, newItems, newEvents, errors)
+        } catch (error: Exception) {
+            // 예전에는 여기서 예외가 나면 collector_run 이 RUNNING 인 채로 영원히 남았다.
+            // V14 마이그레이션이 한 번 치웠지만 마이그레이션은 1회성이라 원인을 코드에서 막는다.
+            run?.let {
+                it.finishedAt = Instant.now()
+                it.status = CollectorRunStatus.FAILED
+                it.errorMessage = (error.message ?: error.javaClass.simpleName).take(1000)
+                collectorRunRepository.save(it)
+            }
+            return CollectorSummary("FAILED", 0, 0, 0, 0, listOf(error.message ?: error.javaClass.simpleName))
         } finally {
             running.set(false)
         }
