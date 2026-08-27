@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:nexplay;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+
+nexplay:
+  catalog:
+    wikidata:
+      initial-delay-ms: 3600000
+  collector:
+    steam:
+      initial-delay-ms: 3600000

@@ -1,0 +1,3 @@
+UPDATE game
+SET featured = b'1'
+WHERE steam_app_id IN (3764200, 3357650, 2483190, 2362060, 2499860, 2288340);

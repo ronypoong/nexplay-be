@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: nexplay-be
+  datasource:
+    url: ${NEXPLAY_DB_URL:jdbc:mysql://127.0.0.1:3306/nexplay?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Seoul}
+    username: ${NEXPLAY_DB_USERNAME}
+    password: ${NEXPLAY_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:4004}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+nexplay:
+  daily-sync:
+    cron: ${NEXPLAY_DAILY_SYNC_CRON:0 0 6 * * *}
+    zone: ${NEXPLAY_DAILY_SYNC_ZONE:Asia/Seoul}
+  catalog:
+    steam-store:
+      timeout-seconds: 12
+    wikidata:
+      timeout-seconds: 60
+      max-rows: 500
+  collector:
+    steam:
+      timeout-seconds: 15
