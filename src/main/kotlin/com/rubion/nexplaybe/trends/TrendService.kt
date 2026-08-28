@@ -4,6 +4,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import com.rubion.nexplaybe.cache.CacheConfig
+import org.springframework.cache.annotation.Cacheable
 
 data class MomentumEntry(
     val slug: String,
@@ -53,6 +55,7 @@ data class TrendsResponse(
 @Transactional(readOnly = true)
 class TrendService(private val jdbc: JdbcTemplate) {
 
+    @Cacheable(CacheConfig.SECTIONS, key = "'trends'")
     fun trends(): TrendsResponse {
         val snapshotDays = jdbc.queryForObject(
             "SELECT COUNT(DISTINCT snapshot_date) FROM popularity_snapshot", Int::class.java,

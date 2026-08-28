@@ -4,6 +4,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
+import com.rubion.nexplaybe.cache.CacheConfig
+import org.springframework.cache.annotation.Cacheable
 
 data class PromiseRow(
     val gameSlug: String,
@@ -46,6 +48,7 @@ data class PromiseLedger(
 @Transactional(readOnly = true)
 class PromiseQueryService(private val jdbc: JdbcTemplate) {
 
+    @Cacheable(CacheConfig.SECTIONS, key = "'promises'")
     fun ledger(): PromiseLedger {
         val totals = jdbc.query(
             "SELECT r.status, COUNT(*) FROM game_promise p JOIN game_promise_resolution r ON r.promise_id = p.id " +
@@ -130,6 +133,7 @@ class PromiseQueryService(private val jdbc: JdbcTemplate) {
     }
 
     /** 한 게임의 약속 이력. 발표 순서대로 읽으면 그 게임이 걸어온 길이 그대로 나온다. */
+    @Cacheable(CacheConfig.GAME_PROMISES)
     fun forGame(slug: String): List<PromiseRow> = jdbc.query(
         """
         SELECT g.slug, g.title, p.claim_type, p.claimed_value, p.announced_at,

@@ -8,6 +8,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
+import com.rubion.nexplaybe.cache.CacheConfig
+import org.springframework.cache.annotation.Cacheable
 
 data class EditorPickResponse(
     val game: GameResponse,
@@ -33,6 +35,7 @@ class EditorPickService(
     private val gameRepository: GameRepository,
     private val jdbc: JdbcTemplate,
 ) {
+    @Cacheable(CacheConfig.SECTIONS, key = "'editor-picks'")
     fun list(): List<EditorPickResponse> {
         val rows = jdbc.query(
             """

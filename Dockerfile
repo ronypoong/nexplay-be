@@ -32,6 +32,16 @@ ENV TZ=Asia/Seoul
 
 # 컨테이너에 준 메모리에 맞춰 힙을 잡는다. 고정값을 박으면 호스트를
 # 옮길 때마다 다시 튜닝해야 한다.
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=75"
+#
+# 75 -> 65: 자바가 쓰는 메모리는 힙만이 아니다. 메타스페이스, 스레드 스택,
+# GC 자체, JIT 코드 캐시, 네트워크 버퍼가 힙 밖에 따로 붙는다. 75%를 힙에 주면
+# 남은 25%로 그걸 다 감당해야 해서, 컨테이너가 죽는 건 힙이 아니라 이쪽이다.
+#
+# SerialGC: 코어 하나짜리 컨테이너에서 G1 은 백그라운드 스레드와 리전 메타데이터로
+# 수십 MB를 먼저 가져간다. 힙이 수백 MB 규모면 그 값이 아깝다.
+#
+# 메타스페이스 상한: 안 잡으면 무제한이라, 새는 곳이 있을 때 힙이 아니라
+# 컨테이너가 통째로 OOM 으로 죽는다. 원인을 찾기 가장 어려운 형태다.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=65 -XX:+UseSerialGC -XX:MaxMetaspaceSize=192m -Xss512k -XX:+ExitOnOutOfMemoryError"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

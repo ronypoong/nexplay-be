@@ -7,6 +7,8 @@ import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
+import com.rubion.nexplaybe.cache.CacheConfig
+import org.springframework.cache.annotation.Cacheable
 
 data class AwardSyncSummary(val status: String, val fetched: Int, val stored: Int, val gamesAdded: Int)
 
@@ -114,6 +116,7 @@ class GameAwardService(
     }
 
     @Transactional(readOnly = true)
+    @Cacheable(CacheConfig.SECTIONS, key = "'goty'")
     fun goty(): GotyResponse {
         val rows = jdbc.query(
             """

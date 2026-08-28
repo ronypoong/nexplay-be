@@ -4,6 +4,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import com.rubion.nexplaybe.cache.CacheConfig
+import org.springframework.cache.annotation.Cacheable
 
 data class PublisherKoreanRate(
     val publisher: String,
@@ -48,6 +50,7 @@ data class KoreanRadarResponse(
 @Transactional(readOnly = true)
 class KoreanSupportService(private val jdbc: JdbcTemplate) {
 
+    @Cacheable(CacheConfig.SECTIONS, key = "'korean-' + #minSampleSize")
     fun radar(minSampleSize: Int = MIN_SAMPLE): KoreanRadarResponse {
         val coverage = jdbc.queryForObject(
             """

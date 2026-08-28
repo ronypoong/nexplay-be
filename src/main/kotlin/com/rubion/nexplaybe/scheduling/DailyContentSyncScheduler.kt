@@ -2,6 +2,7 @@ package com.rubion.nexplaybe.scheduling
 
 import com.rubion.nexplaybe.awards.AwardSyncSummary
 import com.rubion.nexplaybe.awards.GameAwardService
+import com.rubion.nexplaybe.cache.ReadCacheEvictor
 import com.rubion.nexplaybe.catalog.CatalogSyncService
 import com.rubion.nexplaybe.intelligence.EventIntelligenceService
 import com.rubion.nexplaybe.intelligence.ExtractionSummary
@@ -32,6 +33,7 @@ class DailyContentSyncScheduler(
     private val gameAwardService: GameAwardService,
     private val eventIntelligenceService: EventIntelligenceService,
     private val promiseLedgerService: PromiseLedgerService,
+    private val readCacheEvictor: ReadCacheEvictor,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -61,6 +63,8 @@ class DailyContentSyncScheduler(
         val promises = step("promise-extraction", PromiseSyncSummary("FAILED", 0, 0, 0)) { promiseLedgerService.extractPromises() }
         // 채점은 모델 없이도 돌아야 한다. 추출이 실패해도 어제까지 적힌 약속은 오늘 채점된다.
         val resolutions = step("promise-resolution", ResolutionSummary(0, 0, 0, 0, 0)) { promiseLedgerService.resolve() }
+        // 오늘치가 다 들어왔으니 어제 계산해 둔 목록은 버린다.
+        readCacheEvictor.evictQuietly()
         log.info(
             "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, awards={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, extractedEvents={}, promisesFound={}, promisesResolved={}, errors={}",
             catalogs.joinToString { "${it.year}:${it.status}" },

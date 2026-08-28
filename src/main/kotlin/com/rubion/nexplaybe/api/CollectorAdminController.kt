@@ -10,6 +10,7 @@ import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.catalog.ManualGameRequest
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
+import com.rubion.nexplaybe.cache.ReadCacheEvictor
 import com.rubion.nexplaybe.intelligence.EventIntelligenceService
 import com.rubion.nexplaybe.intelligence.PromiseLedgerService
 import com.rubion.nexplaybe.source.SourceRepository
@@ -48,6 +49,7 @@ class CollectorAdminController(
     private val gameAwardService: GameAwardService,
     private val eventIntelligenceService: EventIntelligenceService,
     private val promiseLedgerService: PromiseLedgerService,
+    private val readCacheEvictor: ReadCacheEvictor,
 ) {
     /** 수집한 뉴스를 모델이 읽고 분류·구조화한다. 키가 없으면 SKIPPED 를 돌려준다. */
     @PostMapping("/events/extract")
