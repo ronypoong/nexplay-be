@@ -17,7 +17,6 @@ import com.rubion.nexplaybe.intelligence.EventInsightLookup
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import com.rubion.nexplaybe.event.GameEventType
 import com.rubion.nexplaybe.game.GameStatus
 import java.time.Clock
 import java.time.LocalDate
@@ -32,6 +31,7 @@ class DiscoveryService(
     private val releaseRepository: ReleaseRepository,
     private val awardBadgeLookup: AwardBadgeLookup,
     private val eventInsightLookup: EventInsightLookup,
+    private val feedEventSelector: FeedEventSelector,
 ) {
     private val clock: Clock = Clock.systemUTC()
 
@@ -46,9 +46,12 @@ class DiscoveryService(
     fun feed(): FeedResponse {
         val games = catalogSnapshot.entries()
         val insights = eventInsightLookup.insights()
-        // 마케팅 잡음은 홈에서 뺀다. 분류한 54건 중 17건이 그랬다. 지우지는 않는다 —
-        // 게임 이력에는 그대로 남고, 표시만 달아 준다.
-        val events = eventRepository.findFeedEvents().filterNot { insights[it.id]?.marketingNoise == true }
+        // 중요도로 고른 것만 읽는다. 예전에는 3,276건을 전부 엔티티로 불러와
+        // 앞의 30건만 썼다 — 콜드 요청이 1.2초였다.
+        val ranked = feedEventSelector.topEventIds(FEED_EVENT_LIMIT)
+        val byId = eventRepository.findFeedEventsByIds(ranked).associateBy { it.id }
+        val events = ranked.mapNotNull(byId::get)
+        val eventStats = feedEventSelector.stats()
         val today = LocalDate.now(ZoneId.of(SEOUL))
         val currentYear = today.year
 
@@ -65,14 +68,14 @@ class DiscoveryService(
             games = games.take(FEED_GAME_LIMIT).map { it.card },
             upcoming = upcomingAll.take(UPCOMING_LIMIT).map { it.card },
             hiddenGems = hiddenGems.map { it.card },
-            events = events.take(FEED_EVENT_LIMIT).map { it.toResponse(clock, insights[it.id]) },
+            events = events.map { it.toResponse(clock, insights[it.id]) },
             stats = FeedStats(
                 totalGames = games.size,
                 currentYearGames = games.count { it.releaseDate?.year == currentYear },
-                totalEvents = events.size,
+                totalEvents = eventStats.total,
                 upcomingGames = upcomingAll.size,
-                updateEvents = events.count { it.type == GameEventType.MAJOR_UPDATE || it.type == GameEventType.PATCH },
-                expansionEvents = events.count { it.type == GameEventType.EXPANSION || it.type == GameEventType.DLC },
+                updateEvents = eventStats.updateEvents,
+                expansionEvents = eventStats.expansionEvents,
             ),
         )
     }

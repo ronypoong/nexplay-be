@@ -12,6 +12,10 @@ interface GameEventRepository : JpaRepository<GameEvent, Long> {
     fun findFeedEvents(): List<GameEvent>
 
     @EntityGraph(attributePaths = ["game", "sources", "sources.source"])
+    @Query("select distinct e from GameEvent e where e.id in :ids")
+    fun findFeedEventsByIds(@Param("ids") ids: Collection<Long>): List<GameEvent>
+
+    @EntityGraph(attributePaths = ["game", "sources", "sources.source"])
     @Query("select distinct e from GameEvent e where e.game.slug = :slug order by e.publishedAt desc")
     fun findByGameSlug(@Param("slug") slug: String): List<GameEvent>
 
