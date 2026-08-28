@@ -1,26 +1,29 @@
--- 1) 출시 라벨에 코틀린 템플릿이 문자열 그대로 저장됐다.
+-- 1) 출시 라벨에 코틀린 문자열 템플릿이 보간되지 않고 그대로 저장됐다.
+--    화면에 달러-중괄호-year 문자열이 그대로 떴다. 83개 행이 그랬다.
 --
--- backfillReleaseDate 가 "${'$'}{year}년 출시" 로 쓰여 있었다. ${'$'} 는 리터럴 달러를
--- 만들므로 결과가 보간되지 않고 "${year}년 출시" 가 그대로 들어갔다. 83개 행이
--- 화면에 그 문자열을 그대로 보여주고 있었다.
+--    주의: Flyway 는 SQL 안의 달러-중괄호를 자기 플레이스홀더로 해석한다.
+--    그래서 아래 패턴은 CONCAT 으로 조립한다. 리터럴로 쓰면 마이그레이션 파싱이
+--    깨지고 애플리케이션이 기동하지 못한다.
 UPDATE game
 SET release_label = CONCAT(YEAR(release_date), '년 출시')
-WHERE release_label LIKE '%${year}년 출시' AND release_date IS NOT NULL;
+WHERE release_date IS NOT NULL
+  AND release_label LIKE CONCAT('%', CHAR(36), '{year}년 출시');
 
 UPDATE game
 SET release_label = CONCAT(YEAR(release_date), '년 출시 예정')
-WHERE release_label LIKE '%${year}년 출시 예정' AND release_date IS NOT NULL;
+WHERE release_date IS NOT NULL
+  AND release_label LIKE CONCAT('%', CHAR(36), '{year}년 출시 예정');
+
+-- 남은 것이 있으면(날짜가 없어 위에서 못 고친 경우) 최소한 깨진 문자열은 치운다.
+UPDATE game
+SET release_label = '출시일 미정'
+WHERE release_label LIKE CONCAT('%', CHAR(36), '{year}%');
 
 -- 2) 수상 동기화가 GTA VI 를 중복 생성했다.
 --
--- 카탈로그의 원본(V11 에서 넣은 것)에 wikidata_id 가 없어서 매칭에 실패했고,
--- Steam appId 도 양쪽 다 없어 유니크 제약도 걸리지 않았다.
--- 원본에 Wikidata 식별자를 달아 앞으로는 매칭되게 하고, 수상 기록을 원본으로 옮긴 뒤
--- 중복 행을 지운다.
-UPDATE game g
-JOIN (SELECT id FROM game WHERE wikidata_id = 'Q23648408') dup
-SET g.wikidata_id = NULL
-WHERE g.id = dup.id;
+-- 카탈로그의 원본(V11)에 wikidata_id 가 없어 매칭에 실패했고, Steam appId 는
+-- 양쪽 다 없어서 유니크 제약도 걸리지 않았다.
+UPDATE game SET wikidata_id = NULL WHERE wikidata_id = 'Q23648408';
 
 UPDATE game SET wikidata_id = 'Q23648408'
 WHERE slug = 'grand-theft-auto-vi' AND wikidata_id IS NULL;
