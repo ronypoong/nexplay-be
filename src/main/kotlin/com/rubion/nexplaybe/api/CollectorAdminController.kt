@@ -11,6 +11,7 @@ import com.rubion.nexplaybe.catalog.ManualGameRequest
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
 import com.rubion.nexplaybe.cache.ReadCacheEvictor
+import com.rubion.nexplaybe.collector.RawPayloadBackfill
 import com.rubion.nexplaybe.intelligence.EventIntelligenceService
 import com.rubion.nexplaybe.intelligence.PromiseLedgerService
 import com.rubion.nexplaybe.source.SourceRepository
@@ -50,11 +51,19 @@ class CollectorAdminController(
     private val eventIntelligenceService: EventIntelligenceService,
     private val promiseLedgerService: PromiseLedgerService,
     private val readCacheEvictor: ReadCacheEvictor,
+    private val rawPayloadBackfill: RawPayloadBackfill,
 ) {
     /** 수집한 뉴스를 모델이 읽고 분류·구조화한다. 키가 없으면 SKIPPED 를 돌려준다. */
     @PostMapping("/events/extract")
     fun extractEvents(@RequestParam(defaultValue = "100") limit: Int) =
         eventIntelligenceService.extract(limit)
+
+    /**
+     * 본문이 빈 채로 저장된 소식의 원문을 피드에서 되받아 채운다.
+     * 비어 있는 칸만 채우고 새 행이나 이벤트는 만들지 않는다.
+     */
+    @PostMapping("/collectors/steam/backfill-bodies")
+    fun backfillBodies(@RequestParam(defaultValue = "30") limit: Int) = rawPayloadBackfill.run(limit)
 
     /** 발표 원문에서 "앞으로 하겠다"는 약속만 뽑아 대조표에 적는다. */
     @PostMapping("/promises/extract")
