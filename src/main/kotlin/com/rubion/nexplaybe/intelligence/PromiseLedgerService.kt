@@ -43,6 +43,10 @@ class PromiseLedgerService(
             WHERE NOT EXISTS (
                 SELECT 1 FROM game_promise_scan sc WHERE sc.event_id = e.id AND sc.prompt_version = ?
             )
+              -- 패치노트는 정의상 이미 한 일의 기록이다. 앞으로 할 일이 없으므로
+              -- 물어볼 이유가 없다. 실제로 패치노트 하나에서 "약속" 21건이 나왔는데
+              -- 전부 이미 적용된 변경이었다.
+              AND e.type NOT IN ('PATCH', 'MAJOR_UPDATE')
             GROUP BY e.id, e.game_id, e.title, r.raw_payload, e.summary, e.event_date, g.title, e.type, g.discovery_score
             -- 약속은 출시일·콘텐츠 발표에 있지 패치노트에 있지 않다. 분류와 같은
             -- 순서로 돌아야 같은 예산에서 나오는 약속이 많아진다.
@@ -144,6 +148,9 @@ class PromiseLedgerService(
                 ?.let { if (it.toLocalDate() < candidate.eventDate) java.sql.Date.valueOf(candidate.eventDate) else it }
             val to = claim.claimedTo.toSqlDate()
             val windowValid = from == null || to == null || !to.toLocalDate().isBefore(from.toLocalDate())
+            // 시점이 없으면 영원히 판정할 수 없다. 출시일과 한국어 지원만은 시점이
+            // 없어도 실제 출시일·언어 이력으로 판정할 수 있어 남긴다.
+            if (from == null && to == null && claim.claimType !in DATELESS_OK) return@forEach
             jdbc.update(
                 """
                 INSERT INTO game_promise
@@ -177,6 +184,8 @@ class PromiseLedgerService(
         const val FAILURE_CUTOFF = 5
         const val PROMPT_VERSION = 1
         val CLAIM_TYPES = setOf("RELEASE_DATE", "KOREAN_SUPPORT", "CONTENT", "PLATFORM", "DEMO")
+        /** 시점이 없어도 다른 근거로 판정할 수 있는 종류. */
+        val DATELESS_OK = setOf("RELEASE_DATE", "KOREAN_SUPPORT")
 
         val PROMISE_SCHEMA = Schemas.obj(
             "promises" to Schemas.arrayOf(
@@ -202,6 +211,13 @@ class PromiseLedgerService(
 
             대부분의 글에는 약속이 없습니다. 없으면 빈 배열을 반환하세요. 억지로 찾아내면
             대조표가 쓸모없어집니다.
+
+            특히 패치 노트와 업데이트 안내를 조심하세요. "이제 부활합니다",
+            "유령 상태는 45초간 지속됩니다" 는 이미 적용된 변경이거나 규칙 설명이지
+            약속이 아닙니다. 문장이 현재형이거나 완료형이면 약속이 아닙니다.
+
+            시점이 없는 콘텐츠 약속은 반환하지 마세요. 언제 하겠다는 말이 없으면
+            지켰는지 확인할 방법이 없습니다.
 
             시점은 원문에 적힌 만큼만 옮깁니다.
               "Fall 2026"  -> 2026-09-01 ~ 2026-11-30, SEASON
