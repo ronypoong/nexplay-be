@@ -66,6 +66,7 @@ class GameAwardService(
                 "SELECT COUNT(*) FROM game WHERE wikidata_id = ?", Int::class.java, wikidataId,
             ) ?: 0
             if (exists > 0) {
+                record.releaseYear?.let { backfillReleaseDate(wikidataId, it) }
                 // 앞선 동기화가 개발사를 Unknown 으로 넣어둔 것이 있다. 이력 매칭이
                 // 개발사를 타고 이뤄지므로 Unknown 이면 관측 대상이 하나도 안 잡힌다.
                 if (record.developer != null) backfillCompanies(wikidataId, developer, publisher)
@@ -79,6 +80,9 @@ class GameAwardService(
                         publisher = publisher,
                         steamAppId = record.steamAppId,
                         wikidataId = wikidataId,
+                        // 출시 연도를 안 넣으면 상태가 TBA 로 남아, 2023년에 나온 게임이
+                        // "올해 눈여겨볼 작품" 목록에 계속 뜬다.
+                        releaseDate = record.releaseYear?.let { java.time.LocalDate.of(it, 1, 1) },
                     ),
                 )
             }.getOrNull()
@@ -128,6 +132,24 @@ class GameAwardService(
         )
     }
 
+    /**
+     * 날짜 없이 들어간 수상작에 출시 연도를 채운다.
+     * 상태가 TBA 로 남으면 이미 나온 게임이 "출시 예정" 목록에 계속 걸린다.
+     */
+    private fun backfillReleaseDate(wikidataId: String, year: Int) {
+        val isPast = year < java.time.LocalDate.now().year
+        jdbc.update(
+            """
+            UPDATE game SET release_date = ?, release_label = ?, status = ?
+            WHERE wikidata_id = ? AND release_date IS NULL
+            """.trimIndent(),
+            java.sql.Date.valueOf(java.time.LocalDate.of(year, 1, 1)),
+            if (isPast) "${'$'}{year}년 출시" else "${'$'}{year}년 출시 예정",
+            if (isPast) "AVAILABLE" else "UPCOMING",
+            wikidataId,
+        )
+    }
+
     /** 옛 동기화가 남긴 Unknown 개발사를 실제 이름으로 채운다. */
     private fun backfillCompanies(wikidataId: String, developer: String, publisher: String) {
         transactions.execute {
@@ -154,7 +176,9 @@ class GameAwardService(
             SELECT g.slug, g.title, g.release_label, g.cover_image_url, a.award_year
             FROM game_award a JOIN game g ON g.id = a.game_id
             WHERE a.award_name = 'The Game Awards Most Anticipated Game'
-              AND g.status <> 'AVAILABLE'
+              AND g.status = 'UPCOMING'
+              AND a.award_year >= YEAR(CURDATE()) - 1
+              AND (g.release_date IS NULL OR g.release_date >= CURDATE())
             ORDER BY a.award_year DESC
             """.trimIndent(),
             RowMapper { rs, _ ->
