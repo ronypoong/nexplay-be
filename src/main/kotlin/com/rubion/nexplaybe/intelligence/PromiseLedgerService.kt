@@ -113,14 +113,15 @@ class PromiseLedgerService(
             jdbc.update(
                 """
                 INSERT INTO game_promise
-                  (game_id, event_id, claim_type, claimed_value, claimed_from, claimed_to,
+                  (game_id, event_id, claim_type, claim_key, claimed_value, claimed_from, claimed_to,
                    claim_precision, source_quote, announced_at, provenance, model, prompt_version)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                ON DUPLICATE KEY UPDATE claimed_value=VALUES(claimed_value),
-                  claimed_from=VALUES(claimed_from), claimed_to=VALUES(claimed_to),
-                  claim_precision=VALUES(claim_precision), source_quote=VALUES(source_quote)
+                VALUES (?,?,?,SHA2(CONCAT(?,'|',?),256),?,?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE claimed_from=VALUES(claimed_from),
+                  claimed_to=VALUES(claimed_to), claim_precision=VALUES(claim_precision),
+                  source_quote=VALUES(source_quote)
                 """.trimIndent(),
-                candidate.gameId, candidate.eventId, claim.claimType, claim.claimedValue.take(200),
+                candidate.gameId, candidate.eventId, claim.claimType,
+                claim.claimType, claim.claimedValue.take(200), claim.claimedValue.take(200),
                 claim.claimedFrom.toSqlDate(), claim.claimedTo.toSqlDate(),
                 claim.claimPrecision.take(20), claim.sourceQuote.take(500),
                 java.sql.Date.valueOf(candidate.eventDate), provenance, model, PROMPT_VERSION,
