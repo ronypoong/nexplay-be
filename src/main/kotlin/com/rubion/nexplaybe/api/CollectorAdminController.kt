@@ -3,12 +3,17 @@ package com.rubion.nexplaybe.api
 import com.rubion.nexplaybe.collector.CollectorRun
 import com.rubion.nexplaybe.collector.SourceSubscriptionRepository
 import com.rubion.nexplaybe.collector.SteamNewsCollector
+import com.rubion.nexplaybe.editorial.EditorPickRequest
+import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.catalog.CatalogSyncService
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
 import com.rubion.nexplaybe.source.SourceRepository
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -33,7 +38,14 @@ class CollectorAdminController(
     private val richMetadataIngestionService: RichMetadataIngestionService,
     private val sourceRepository: SourceRepository,
     private val subscriptionRepository: SourceSubscriptionRepository,
+    private val editorPickService: EditorPickService,
 ) {
+    @PostMapping("/editor-picks")
+    fun addEditorPick(@RequestBody request: EditorPickRequest) = editorPickService.upsert(request)
+
+    @DeleteMapping("/editor-picks/{slug}")
+    fun removeEditorPick(@PathVariable slug: String) = mapOf("removed" to editorPickService.remove(slug))
+
     @PostMapping("/collectors/steam/run")
     fun runSteamCollector() = steamNewsCollector.collect()
 

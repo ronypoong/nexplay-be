@@ -23,13 +23,13 @@ class RichMetadataIngestionService(
 ) {
 
     private data class SteamGameRef(val id: Long, val title: String, val officialUrl: String?)
-    fun enrichFromSteam(limit: Int = 12): RichMetadataSyncSummary {
+    fun enrichFromSteam(limit: Int = DEFAULT_ENRICH_LIMIT): RichMetadataSyncSummary {
         val candidateIds = jdbc.queryForList(
             """
             SELECT g.id FROM game g WHERE g.steam_app_id IS NOT NULL AND
               NOT EXISTS (SELECT 1 FROM game_data_provenance p WHERE p.game_id=g.id AND p.field_name='extended_metadata_checked' AND p.source_name='Steam Store')
             ORDER BY g.featured DESC, g.discovery_score DESC LIMIT ?
-            """.trimIndent(), Long::class.java, limit.coerceIn(1, 50),
+            """.trimIndent(), Long::class.java, limit.coerceIn(1, MAX_ENRICH_LIMIT),
         ).filterNotNull()
         if (candidateIds.isEmpty()) return RichMetadataSyncSummary("SUCCESS", 0, 0, 0)
         val candidates = gameRepository.findAllForDiscoveryByIds(candidateIds)
@@ -40,8 +40,10 @@ class RichMetadataIngestionService(
         // Steam 이 실제로 죽었을 때만 중단한다. 특정 앱 하나가 지역 제한이나 삭제 상태여도 나머지는 계속 진행한다.
         var consecutiveFailures = 0
         var enriched = 0
-        for (game in candidates) {
+        for ((index, game) in candidates.withIndex()) {
             if (consecutiveFailures >= STEAM_FAILURE_CUTOFF) break
+            // 한 번에 수백 건을 훑으므로 Steam 에 예의를 지킨다.
+            if (index > 0) runCatching { Thread.sleep(REQUEST_INTERVAL_MS) }
             val metadata = runCatching { steam.fetchDetails(requireNotNull(game.steamAppId)) }.getOrNull()
             if (metadata == null) {
                 consecutiveFailures++
@@ -173,5 +175,11 @@ class RichMetadataIngestionService(
 
     private companion object {
         const val STEAM_FAILURE_CUTOFF = 5
+        // 하루 12건이면 남은 400여 건을 채우는 데 한 달이 걸린다.
+        const val DEFAULT_ENRICH_LIMIT = 200
+        const val MAX_ENRICH_LIMIT = 500
+        // Steam appdetails 는 IP 당 5분에 200건 언저리에서 막는다.
+        // 300ms 로 돌렸더니 200건 중 197건이 차단됐다. 한 건당 1.5초면 그 한도 안에 들어간다.
+        const val REQUEST_INTERVAL_MS = 1_500L
     }
 }

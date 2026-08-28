@@ -1,6 +1,8 @@
 package com.rubion.nexplaybe.api
 
 import com.rubion.nexplaybe.discovery.DiscoveryService
+import com.rubion.nexplaybe.editorial.EditorPickService
+import com.rubion.nexplaybe.korean.KoreanSupportService
 import com.rubion.nexplaybe.metadata.ExtendedGameMetadataService
 import jakarta.validation.constraints.Size
 import org.springframework.format.annotation.DateTimeFormat
@@ -16,7 +18,17 @@ import java.time.LocalDate
 class DiscoveryController(
     private val discoveryService: DiscoveryService,
     private val metadataService: ExtendedGameMetadataService,
+    private val editorPickService: EditorPickService,
+    private val koreanSupportService: KoreanSupportService,
 ) {
+    /** 주인장이 직접 고른 목록. 알고리즘 정렬과 대비되는 자리다. */
+    @GetMapping("/editor-picks")
+    fun editorPicks() = editorPickService.list()
+
+    /** 한국어 지원 레이더: 커버리지, 퍼블리셔별 지원률, 미확인작 확률, 풀보이스 목록. */
+    @GetMapping("/korean")
+    fun koreanRadar() = koreanSupportService.radar()
+
     @GetMapping("/feed")
     fun feed() = discoveryService.feed()
 

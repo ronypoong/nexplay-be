@@ -32,6 +32,7 @@ data class CatalogSyncSummary(
     val fetched: Int,
     val inserted: Int,
     val companiesCreated: Int,
+    val dateChanges: Int = 0,
     val error: String? = null,
 )
 
@@ -73,8 +74,11 @@ class CatalogSyncService(
                 return CatalogSyncSummary("SKIPPED_SOURCE_DISABLED", year, 0, 0, 0)
             }
             run = collectorRunRepository.save(CollectorRun(source = source, startedAt = Instant.now()))
-            val discoveredItems = client.fetchReleaseYear(year)
-                .filter { gameRepository.findByWikidataId(it.wikidataId) == null }
+            val fetchedItems = client.fetchReleaseYear(year)
+            // 예전에는 이미 아는 게임을 여기서 걸러내고 끝이라, Wikidata 가 출시일을 바꿔도
+            // 아무도 보지 않았다. release_revision 이 전부 INITIAL_CONFIRMATION 이었던 이유다.
+            val dateChanges = recordReleaseDateChanges(fetchedItems)
+            val discoveredItems = fetchedItems.filter { gameRepository.findByWikidataId(it.wikidataId) == null }
             val items = enrichNewItemsFromSteam(discoveredItems)
             val classifications = client.fetchClassifications(items.map { it.wikidataId })
             val classifiedItems = items.map { item ->
@@ -102,7 +106,7 @@ class CatalogSyncService(
             run.newItemCount = inserted
             collectorRunRepository.save(run)
             refreshMagazineSubscriptions()
-            return CatalogSyncSummary("SUCCESS", year, classifiedItems.size, inserted, companiesCreated)
+            return CatalogSyncSummary("SUCCESS", year, classifiedItems.size, inserted, companiesCreated, dateChanges)
         } catch (error: Exception) {
             run?.let {
                 it.finishedAt = Instant.now()
@@ -110,7 +114,7 @@ class CatalogSyncService(
                 it.errorMessage = (error.message ?: error.javaClass.simpleName).take(1000)
                 collectorRunRepository.save(it)
             }
-            return CatalogSyncSummary("FAILED", year, 0, 0, 0, error.message)
+            return CatalogSyncSummary("FAILED", year, 0, 0, 0, error = error.message)
         } finally {
             running.set(false)
         }
@@ -236,6 +240,56 @@ class CatalogSyncService(
     }
 
     /**
+     * Wikidata 가 알려주는 출시일이 저장된 값과 다르면 이력으로 남기고 게임을 갱신한다.
+     * 연기 이력이 쌓여야 "이 개발사는 얼마나 미루는가" 를 말할 수 있다.
+     */
+    private fun recordReleaseDateChanges(items: List<CatalogGameItem>): Int {
+        var changes = 0
+        items.forEach { item ->
+            val game = gameRepository.findByWikidataId(item.wikidataId) ?: return@forEach
+            val previous = game.releaseDate ?: return@forEach
+            if (previous == item.releaseDate) return@forEach
+            // 연도만 아는 날짜(1월 1일)끼리 해가 같으면 정밀도 차이일 뿐 변경이 아니다.
+            if (isYearOnly(previous) && isYearOnly(item.releaseDate) && previous.year == item.releaseDate.year) return@forEach
+            val changeType = when {
+                isYearOnly(previous) || isYearOnly(item.releaseDate) -> "DATE_CHANGE"
+                item.releaseDate.isAfter(previous) -> "DELAY"
+                else -> "DATE_CHANGE"
+            }
+            game.platforms.forEach { platform ->
+                jdbc.update(
+                    """INSERT INTO release_revision (game_id,platform,previous_date,new_date,change_type,announced_at,source_name,source_url)
+                    VALUES (?,?,?,?,?,CURRENT_DATE,'Wikidata',?)""",
+                    game.id, platform, java.sql.Date.valueOf(previous), java.sql.Date.valueOf(item.releaseDate),
+                    changeType, "https://www.wikidata.org/wiki/${item.wikidataId}",
+                )
+            }
+            jdbc.update(
+                "UPDATE game SET release_date=?, release_label=?, status=? WHERE id=?",
+                java.sql.Date.valueOf(item.releaseDate), releaseLabelFor(item.releaseDate),
+                if (isStillUpcoming(item.releaseDate)) GameStatus.UPCOMING.name else GameStatus.AVAILABLE.name,
+                game.id,
+            )
+            jdbc.update(
+                "UPDATE game_release SET release_date=?, status=? WHERE game_id=?",
+                java.sql.Date.valueOf(item.releaseDate),
+                if (isStillUpcoming(item.releaseDate)) ReleaseStatus.EXPECTED.name else ReleaseStatus.RELEASED.name,
+                game.id,
+            )
+            changes++
+        }
+        return changes
+    }
+
+    private fun isYearOnly(date: LocalDate) = date.monthValue == 1 && date.dayOfMonth == 1
+
+    private fun releaseLabelFor(date: LocalDate, today: LocalDate = LocalDate.now()): String = when {
+        isYearOnly(date) && date.year < today.year -> "${date.year}년 출시"
+        isYearOnly(date) -> "${date.year}년 출시 예정"
+        else -> "%d. %02d. %02d".format(date.year, date.monthValue, date.dayOfMonth)
+    }
+
+    /**
      * 상태는 저장 컬럼이라 시간이 지나면 저절로 어긋난다.
      * 2026-01-01 로 들어간 "2026년 출시 예정" 게임은 2027년이 되어도 예정으로 남는다.
      * 매일 한 번 현재 날짜 기준으로 다시 맞춘다. V18 마이그레이션과 같은 규칙이다.
@@ -312,13 +366,8 @@ class CatalogSyncService(
         val colors = colorsFor(item.wikidataId)
         // Wikidata 가 연도만 알 때 1월 1일로 내려준다. 이걸 "예정" 으로 두면 지난 해 게임이 영원히 출시 예정으로 남는다.
         val yearOnly = item.releaseDate.monthValue == 1 && item.releaseDate.dayOfMonth == 1
-        val yearPassed = yearOnly && item.releaseDate.year < today.year
         val stillUpcoming = if (yearOnly) item.releaseDate.year >= today.year else item.releaseDate.isAfter(today)
-        val releaseLabel = when {
-            yearOnly && yearPassed -> "${item.releaseDate.year}년 출시"
-            yearOnly -> "${item.releaseDate.year}년 출시 예정"
-            else -> "%d. %02d. %02d".format(item.releaseDate.year, item.releaseDate.monthValue, item.releaseDate.dayOfMonth)
-        }
+        val releaseLabel = releaseLabelFor(item.releaseDate, today)
         val symbol = item.title.filter(Char::isLetterOrDigit).take(2).uppercase().ifBlank { "✦" }
         return Game(
             slug = slug,

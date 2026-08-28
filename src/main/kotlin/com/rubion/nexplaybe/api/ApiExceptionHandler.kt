@@ -16,4 +16,9 @@ class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     fun notFound(exception: ResourceNotFoundException, request: HttpServletRequest) =
         ApiError(Instant.now(), 404, "Not Found", exception.message ?: "Resource not found", request.requestURI)
+
+    @ExceptionHandler(IllegalArgumentException::class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    fun badRequest(exception: IllegalArgumentException, request: HttpServletRequest) =
+        ApiError(Instant.now(), 400, "Bad Request", exception.message ?: "Invalid request", request.requestURI)
 }
