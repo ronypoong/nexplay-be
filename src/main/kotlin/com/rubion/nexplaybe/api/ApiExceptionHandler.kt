@@ -1,5 +1,6 @@
 package com.rubion.nexplaybe.api
 
+import com.rubion.nexplaybe.anticipation.TooManyVotesException
 import com.rubion.nexplaybe.discovery.ResourceNotFoundException
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpStatus
@@ -16,6 +17,11 @@ class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.NOT_FOUND)
     fun notFound(exception: ResourceNotFoundException, request: HttpServletRequest) =
         ApiError(Instant.now(), 404, "Not Found", exception.message ?: "Resource not found", request.requestURI)
+
+    @ExceptionHandler(TooManyVotesException::class)
+    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
+    fun tooManyVotes(exception: TooManyVotesException, request: HttpServletRequest) =
+        ApiError(Instant.now(), 429, "Too Many Requests", exception.message ?: "", request.requestURI)
 
     @ExceptionHandler(IllegalArgumentException::class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)

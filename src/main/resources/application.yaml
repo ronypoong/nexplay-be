@@ -88,6 +88,11 @@ nexplay:
   archive:
     # 수집 원문 보관 기간. 시간이 지날수록 값이 오르는 자산이라 길게 잡는다.
     raw-retention-days: ${NEXPLAY_RAW_RETENTION_DAYS:3650}
+  anticipation:
+    # IP 해시에 섞는 소금. 비어 있으면 기대 투표가 400 으로 거부된다 —
+    # 소금 없는 해시는 그대로 IP 의 별칭이라 익명이 아니다.
+    salt: ${NEXPLAY_ANTICIPATION_SALT:}
+    daily-limit: ${NEXPLAY_ANTICIPATION_DAILY_LIMIT:40}
   admin:
     # 비어 있으면 관리 API 는 503 으로 막힌다. 설정을 잊었을 때 열리는 것보다 닫히는 편이 안전하다.
     token: ${NEXPLAY_ADMIN_TOKEN:}

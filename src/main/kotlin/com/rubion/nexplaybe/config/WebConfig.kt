@@ -20,7 +20,8 @@ class WebConfig(
     override fun addCorsMappings(registry: CorsRegistry) {
         registry.addMapping("/api/**")
             .allowedOrigins(*allowedOrigins.toTypedArray())
-            .allowedMethods("GET", "OPTIONS")
+            // 기대 투표가 POST 다. 그 외 쓰기는 관리 API 뿐이고 그쪽은 토큰으로 막혀 있다.
+            .allowedMethods("GET", "POST", "OPTIONS")
             .allowedHeaders("*")
             .maxAge(3600)
     }

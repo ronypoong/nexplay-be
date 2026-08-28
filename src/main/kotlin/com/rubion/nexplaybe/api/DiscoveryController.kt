@@ -4,13 +4,16 @@ import com.rubion.nexplaybe.discovery.DiscoveryService
 import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.intelligence.PromiseQueryService
 import com.rubion.nexplaybe.korean.KoreanSupportService
+import com.rubion.nexplaybe.anticipation.AnticipationService
 import com.rubion.nexplaybe.scheduling.SyncStatusService
 import com.rubion.nexplaybe.metadata.ExtendedGameMetadataService
 import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.trends.TrendService
 import jakarta.validation.constraints.Size
 import org.springframework.format.annotation.DateTimeFormat
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -28,7 +31,36 @@ class DiscoveryController(
     private val gameAwardService: GameAwardService,
     private val promiseQueryService: PromiseQueryService,
     private val syncStatusService: SyncStatusService,
+    private val anticipationService: AnticipationService,
 ) {
+    /**
+     * "기대돼요". 누르면 켜지고 다시 누르면 꺼진다.
+     *
+     * 계정을 만들지 않는다. 같은 사람이 두 번 세는 것만 막으면 되고, 그건
+     * 소금을 섞은 IP 해시로 충분하다 — 원본 주소는 저장하지 않는다.
+     */
+    @PostMapping("/games/{slug}/anticipate")
+    fun toggleAnticipation(@PathVariable slug: String, request: HttpServletRequest) =
+        anticipationService.toggle(slug, clientIpOf(request))
+
+    @GetMapping("/games/{slug}/anticipate")
+    fun anticipationState(@PathVariable slug: String, request: HttpServletRequest) =
+        anticipationService.state(slug, clientIpOf(request))
+
+    /** 지금 가장 기대받는 게임. 표본이 얇으면 비어 있다. */
+    @GetMapping("/anticipated")
+    fun anticipated() = anticipationService.ranking()
+
+    /**
+     * Cloudflare 를 거치므로 소켓 주소는 항상 엣지 서버다. 진짜 방문자 주소는
+     * CF-Connecting-IP 에 있다. 이걸 안 보면 모든 방문자가 한 사람이 된다.
+     */
+    private fun clientIpOf(request: HttpServletRequest): String =
+        request.getHeader("CF-Connecting-IP")
+            ?: request.getHeader("X-Forwarded-For")?.substringBefore(',')?.trim()
+            ?: request.remoteAddr
+            ?: "unknown"
+
     /**
      * 수집이 살아 있는지. 마지막 갱신 시각과 단계별 결과를 준다.
      *
