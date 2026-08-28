@@ -34,6 +34,24 @@ data class StudioReliability(
     val averageShiftDays: Int,
 )
 
+/**
+ * 꾸준히 소식을 내던 미출시작이 조용해진 것.
+ *
+ * 연기 발표는 사후에 나오지만 침묵은 그 전에 나온다. 다만 이것을 "연기될 것" 이라고
+ * 말하지는 않는다 — 개발을 접은 팀도, 그냥 조용한 팀도 같은 모습이다. 관측된 사실만
+ * 적고 판단은 보는 사람에게 맡긴다.
+ */
+data class SilenceEntry(
+    val slug: String,
+    val title: String,
+    val releaseLabel: String,
+    /** 평소 간격을 낼 때 쓴 소식 수. 적을수록 흔들리므로 화면에 함께 보여 준다. */
+    val newsCount: Int,
+    val typicalGapDays: Int,
+    val silentDays: Int,
+    val lastNewsAt: String,
+)
+
 data class DataMaturity(val days: Int, val readyAt: Int, val ready: Boolean)
 
 data class TrendsResponse(
@@ -42,6 +60,7 @@ data class TrendsResponse(
     val risingGames: List<MomentumEntry>,
     val recentChanges: List<DelayEntry>,
     val studios: List<StudioReliability>,
+    val silentGames: List<SilenceEntry>,
 )
 
 /**
@@ -163,10 +182,46 @@ class TrendService(private val jdbc: JdbcTemplate) {
             },
         )
 
+        /*
+         * 침묵은 "평소보다 얼마나 오래 조용한가" 로 잰다. 절대 일수로 재면 원래
+         * 분기에 한 번 말하는 팀이 매번 걸린다.
+         *
+         * 소식이 적으면 평소 간격 자체가 못 미덥다. 그래서 최소 건수를 두고,
+         * 그 건수를 화면에도 함께 내보내 보는 사람이 얼마나 믿을지 정하게 한다.
+         */
+        val silent = jdbc.query(
+            """
+            SELECT g.slug, g.title, g.release_label,
+                   COUNT(*) AS news_count,
+                   DATEDIFF(MAX(e.event_date), MIN(e.event_date)) / (COUNT(*) - 1) AS gap,
+                   DATEDIFF(CURRENT_DATE, MAX(e.event_date)) AS silent_days,
+                   MAX(e.event_date) AS last_news
+            FROM game_event e
+            JOIN game g ON g.id = e.game_id
+            -- 출시된 게임이 조용한 것은 이상한 일이 아니다. 아직 안 나온 게임만 본다.
+            WHERE g.status = 'UPCOMING' AND g.archive_only = 0
+            GROUP BY g.id, g.slug, g.title, g.release_label
+            HAVING news_count >= ?
+               AND gap > 0
+               AND silent_days > ? * gap
+               AND silent_days > ?
+            ORDER BY silent_days / gap DESC
+            LIMIT 12
+            """.trimIndent(),
+            RowMapper { rs, _ ->
+                SilenceEntry(
+                    rs.getString("slug"), rs.getString("title"), rs.getString("release_label"),
+                    rs.getInt("news_count"), rs.getBigDecimal("gap").toInt(),
+                    rs.getInt("silent_days"), rs.getDate("last_news").toLocalDate().toString(),
+                )
+            },
+            MIN_NEWS_FOR_RHYTHM, SILENCE_MULTIPLE, MIN_SILENT_DAYS,
+        )
+
         return TrendsResponse(
             DataMaturity(snapshotDays, MIN_SNAPSHOT_DAYS, snapshotDays >= MIN_SNAPSHOT_DAYS),
             DataMaturity(changeCount, MIN_CHANGES, changeCount >= MIN_CHANGES),
-            rising, changes, studios,
+            rising, changes, studios, silent,
         )
     }
 
@@ -176,5 +231,12 @@ class TrendService(private val jdbc: JdbcTemplate) {
         const val MIN_CHANGES = 1
         /** 하루 이틀 차이는 연기가 아니라 같은 날짜를 다르게 말한 것이다. */
         const val MIN_SHIFT_DAYS = 7
+
+        /** 소식 서너 건으로 "평소 간격" 을 말하면 흔들린다. */
+        const val MIN_NEWS_FOR_RHYTHM = 4
+        /** 평소의 세 배는 조용해야 눈에 띄는 침묵이다. */
+        const val SILENCE_MULTIPLE = 3
+        /** 원래 뜸한 팀이 매번 걸리지 않도록 절대 하한도 둔다. */
+        const val MIN_SILENT_DAYS = 60
     }
 }
