@@ -3,6 +3,8 @@ package com.rubion.nexplaybe.scheduling
 import com.rubion.nexplaybe.awards.AwardSyncSummary
 import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.catalog.CatalogSyncService
+import com.rubion.nexplaybe.intelligence.EventIntelligenceService
+import com.rubion.nexplaybe.intelligence.ExtractionSummary
 import com.rubion.nexplaybe.collector.SteamNewsCollector
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.catalog.CatalogSyncSummary
@@ -25,6 +27,7 @@ class DailyContentSyncScheduler(
     private val richMetadataIngestionService: RichMetadataIngestionService,
     private val wikipediaDescriptionService: WikipediaDescriptionService,
     private val gameAwardService: GameAwardService,
+    private val eventIntelligenceService: EventIntelligenceService,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -50,8 +53,9 @@ class DailyContentSyncScheduler(
         val wiki = step("wikipedia-descriptions", WikipediaSyncSummary("FAILED", 0, 0, 0)) { wikipediaDescriptionService.enrichDescriptions() }
         val awards = step("game-awards", AwardSyncSummary("FAILED", 0, 0, 0)) { gameAwardService.sync() }
         val news = step("steam-news", CollectorSummary("FAILED", 0, 0, 0, 0, emptyList())) { steamNewsCollector.collect() }
+        val extraction = step("event-extraction", ExtractionSummary("FAILED", 0, 0, 0)) { eventIntelligenceService.extract() }
         log.info(
-            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, awards={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, errors={}",
+            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, awards={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, extractedEvents={}, errors={}",
             catalogs.joinToString { "${it.year}:${it.status}" },
             catalogs.sumOf { it.inserted },
             refreshed,
@@ -63,6 +67,7 @@ class DailyContentSyncScheduler(
             snapshots,
             news.status,
             news.newEvents,
+            extraction.extracted,
             news.errors.size,
         )
     }

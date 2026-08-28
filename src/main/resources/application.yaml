@@ -38,6 +38,11 @@ management:
       show-details: always
 
 nexplay:
+  intelligence:
+    # 뉴스 분류·추출용 Claude API 키. 비우면 기능 전체가 꺼진다.
+    # 조용히 엉뚱한 값을 쓰느니 아무것도 안 하는 편이 낫다.
+    api-key: ${NEXPLAY_INTELLIGENCE_API_KEY:}
+    model: ${NEXPLAY_INTELLIGENCE_MODEL:claude-opus-5}
   archive:
     # 수집 원문 보관 기간. 시간이 지날수록 값이 오르는 자산이라 길게 잡는다.
     raw-retention-days: ${NEXPLAY_RAW_RETENTION_DAYS:3650}

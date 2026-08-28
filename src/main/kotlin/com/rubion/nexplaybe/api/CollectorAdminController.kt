@@ -10,6 +10,7 @@ import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.catalog.ManualGameRequest
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
+import com.rubion.nexplaybe.intelligence.EventIntelligenceService
 import com.rubion.nexplaybe.source.SourceRepository
 import com.rubion.nexplaybe.wikipedia.WikipediaDescriptionService
 import org.springframework.web.bind.annotation.GetMapping
@@ -44,7 +45,13 @@ class CollectorAdminController(
     private val editorPickService: EditorPickService,
     private val wikipediaDescriptionService: WikipediaDescriptionService,
     private val gameAwardService: GameAwardService,
+    private val eventIntelligenceService: EventIntelligenceService,
 ) {
+    /** 수집한 뉴스를 모델이 읽고 분류·구조화한다. 키가 없으면 SKIPPED 를 돌려준다. */
+    @PostMapping("/events/extract")
+    fun extractEvents(@RequestParam(defaultValue = "100") limit: Int) =
+        eventIntelligenceService.extract(limit)
+
     @PostMapping("/awards/sync")
     fun syncAwards() = gameAwardService.sync()
 
