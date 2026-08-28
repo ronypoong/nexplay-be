@@ -1,5 +1,6 @@
 package com.rubion.nexplaybe.metadata
 
+import com.rubion.nexplaybe.catalog.CatalogSyncService
 import com.rubion.nexplaybe.catalog.SteamStoreClient
 import com.rubion.nexplaybe.catalog.SteamStoreMetadata
 import com.rubion.nexplaybe.catalog.WikidataCatalogClient
@@ -20,6 +21,7 @@ class RichMetadataIngestionService(
     private val wikidata: WikidataCatalogClient,
     private val jdbc: JdbcTemplate,
     private val transactions: TransactionTemplate,
+    private val catalogSyncService: CatalogSyncService,
 ) {
 
     private data class SteamGameRef(val id: Long, val title: String, val officialUrl: String?)
@@ -73,6 +75,8 @@ class RichMetadataIngestionService(
             game.gameModes.clear()
             game.gameModes.addAll(data.gameModes)
         }
+        // 확장 메타데이터 수집은 전 게임을 한 번씩 훑는다. 소개문도 여기서 같이 채운다.
+        catalogSyncService.applyStoreCopy(game, data)
         val korean = data.languages.find { it.code == "ko" }
         // 언어 목록을 읽어냈는데 한국어가 없으면 "확인 중"(null)이 아니라 "미지원"(false)이다.
         game.koreanTextSupported = if (data.languages.isEmpty()) null else korean != null

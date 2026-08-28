@@ -12,6 +12,10 @@ import java.time.Duration
 data class SteamStoreMetadata(
     val name: String,
     val headerImageUrl: String,
+    /** 한 문단 요약. 카드와 태그라인에 쓴다. */
+    val shortDescription: String? = null,
+    /** 본문 소개. detailed_description 은 에디션·DLC 판매 문구가 섞여 있어 쓰지 않는다. */
+    val aboutTheGame: String? = null,
     val genres: Set<String>,
     val platforms: Set<String>,
     val gameModes: Set<String> = emptySet(),
@@ -54,6 +58,8 @@ class SteamStoreClient(
         val data = result.path("data")
         val name = data.path("name").asText().trim()
         val image = data.path("header_image").asText().trim()
+        val shortDescription = data.path("short_description").asText().toReadableText().takeIf(String::isNotBlank)
+        val aboutTheGame = data.path("about_the_game").asText().toReadableText().takeIf(String::isNotBlank)
         if (name.isBlank() || !image.startsWith("https://")) return null
         val genres = data.path("genres")
             .mapNotNull { it.path("description").asText().trim().takeIf(String::isNotBlank) }
@@ -89,12 +95,28 @@ class SteamStoreClient(
             .toCollection(linkedSetOf())
         val dlcIds = data.path("dlc").mapNotNull { it.asLong().takeIf { value -> value > 0 } }.toSet()
         return SteamStoreMetadata(
-            name, image, genres, platforms, modes, languages, screenshots + movies,
+            name, image, shortDescription, aboutTheGame, genres, platforms, modes, languages, screenshots + movies,
             requirements.path("minimum").asText().takeIf(String::isNotBlank),
             requirements.path("recommended").asText().takeIf(String::isNotBlank),
             price, ratings, accessibility, dlcIds,
         )
     }
+
+    /**
+     * Steam 소개문은 HTML 이다. 태그를 지우되 문단 구분은 남긴다 —
+     * 전부 한 줄로 뭉치면 900자짜리 글이 읽을 수 없는 덩어리가 된다.
+     */
+    private fun String.toReadableText(): String = this
+        .replace(Regex("(?i)<br\\s*/?>"), "\n")
+        .replace(Regex("(?i)</(p|h[1-6]|li|div)>"), "\n")
+        .replace(Regex("(?i)<li[^>]*>"), "· ")
+        .replace(Regex("<[^>]+>"), " ")
+        .replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&quot;", "\"").replace("&#39;", "'")
+        .lines().joinToString("\n") { it.replace(Regex("[ \t]+"), " ").trim() }
+        .replace(Regex("\n{3,}"), "\n\n")
+        .trim()
+        .take(MAX_DESCRIPTION_LENGTH)
 
     private fun canonicalGenre(value: String): String = when (value.trim().lowercase()) {
         "action", "액션" -> "액션"
@@ -168,6 +190,7 @@ class SteamStoreClient(
     }
 
     private companion object {
+        const val MAX_DESCRIPTION_LENGTH = 2_000
         val FOOTNOTE_SEPARATOR = Regex("(?i)<br\\s*/?>")
         val NON_GENRE_LABELS = setOf("무료 플레이", "Free to Play", "앞서 해보기", "Early Access")
         val ACCESSIBILITY_KEYWORDS = setOf("자막", "색상", "색맹", "음량", "볼륨", "카메라", "텍스트", "난이도", "subtitles", "color", "volume", "camera", "text size", "difficulty")

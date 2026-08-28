@@ -29,10 +29,11 @@ class Game(
     val originalTitle: String? = null,
     @Column(nullable = false, length = 180)
     val title: String,
+    // Steam 소개문으로 갱신되므로 var 다. 사람이 손본 문구는 CatalogSyncService 가 덮지 않는다.
     @Column(nullable = false, length = 240)
-    val tagline: String,
+    var tagline: String,
     @Column(nullable = false, columnDefinition = "TEXT")
-    val description: String,
+    var description: String,
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "developer_id", nullable = false)
     val developer: Company,

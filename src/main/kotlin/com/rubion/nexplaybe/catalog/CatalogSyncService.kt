@@ -51,9 +51,11 @@ data class ManualGameRequest(
     val officialUrl: String? = null,
     val tagline: String? = null,
     val description: String? = null,
-    val genres: Set<String> = emptySet(),
-    val platforms: Set<String> = emptySet(),
-    val gameModes: Set<String> = emptySet(),
+    // Jackson 이 코틀린 기본값을 채우지 않고 null 을 넘겨서, non-null Set 으로 두면
+    // 이 필드들을 생략한 요청이 전부 400 이 된다. nullable 로 받고 안에서 비운다.
+    val genres: Set<String>? = null,
+    val platforms: Set<String>? = null,
+    val gameModes: Set<String>? = null,
 )
 
 data class StoreEnrichmentSummary(
@@ -170,7 +172,12 @@ class CatalogSyncService(
         genres = metadata.genres,
         platforms = metadata.platforms,
         gameModes = metadata.gameModes,
-    )
+    ).also {
+        storeCopy[item.wikidataId] = metadata.aboutTheGame to metadata.shortDescription
+    }
+
+    /** applyStoreMetadata 가 넘겨준 소개문. CatalogGameItem 을 건드리지 않고 toGame 까지 전달한다. */
+    private val storeCopy = mutableMapOf<String, Pair<String?, String?>>()
 
     fun enrichIncompleteStoreMetadata(limit: Int = 500): StoreEnrichmentSummary {
         val candidates = gameRepository.findAllForDiscovery()
@@ -212,6 +219,7 @@ class CatalogSyncService(
                 game.gameModes.clear()
                 game.gameModes.addAll(metadata.gameModes)
             }
+            applyStoreCopy(game, metadata)
             gameRepository.save(game)
             syncReleases(game, platformsBefore)
             enriched++
@@ -336,6 +344,29 @@ class CatalogSyncService(
         return games + releases
     }
 
+    /**
+     * 소개문을 Steam 것으로 채운다. 사람이 손본 문구는 덮지 않고,
+     * 자동 생성된 보일러플레이트만 교체한다.
+     */
+    fun applyStoreCopy(game: Game, metadata: SteamStoreMetadata): Boolean {
+        var changed = false
+        metadata.aboutTheGame?.let { about ->
+            if (isBoilerplate(game.description) || game.description.length < about.length / 2) {
+                game.description = about
+                changed = true
+            }
+        }
+        metadata.shortDescription?.let { short ->
+            if (isBoilerplate(game.tagline)) {
+                game.tagline = short.take(240)
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    private fun isBoilerplate(text: String) = BOILERPLATE_MARKERS.any { text.contains(it) }
+
     // 플랫폼 집합이 바뀌면 release 행도 같이 맞춘다.
     // 예전에는 "미정" 이었던 경우에만 다시 만들어서 game.platforms 와 release.platform 이 어긋났다.
     private fun syncReleases(game: Game, platformsBefore: Set<String>) {
@@ -364,16 +395,16 @@ class CatalogSyncService(
         val publisher = resolveCompany(CatalogCompanyRef(null, request.publisher), CompanyType.PUBLISHER).first
         var slug = slugify(title)
         if (gameRepository.findBySlug(slug) != null) slug += "-${request.wikidataId?.lowercase() ?: request.steamAppId}"
-        val genres = (storeMetadata?.genres.orEmpty() + request.genres).ifEmpty { setOf("미분류") }
-        val platforms = (storeMetadata?.platforms.orEmpty() + request.platforms).ifEmpty { setOf("미정") }
+        val genres = (storeMetadata?.genres.orEmpty() + request.genres.orEmpty()).ifEmpty { setOf("미분류") }
+        val platforms = (storeMetadata?.platforms.orEmpty() + request.platforms.orEmpty()).ifEmpty { setOf("미정") }
         val colors = colorsFor(request.wikidataId ?: request.steamAppId.toString())
         val game = gameRepository.save(
             Game(
                 slug = slug,
                 originalTitle = request.title,
                 title = title,
-                tagline = request.tagline ?: "주목할 신작",
-                description = request.description
+                tagline = request.tagline ?: storeMetadata?.shortDescription?.take(240) ?: "주목할 신작",
+                description = request.description ?: storeMetadata?.aboutTheGame
                     ?: "${storeMetadata?.let { "Steam 스토어" } ?: "Wikidata"}에서 확인한 정보입니다. 공식 발표가 연결되면 일정과 상세 정보를 계속 보강합니다.",
                 developer = developer,
                 publisher = publisher,
@@ -399,7 +430,7 @@ class CatalogSyncService(
                 featured = false,
                 genres = genres.toCollection(linkedSetOf()),
                 platforms = platforms.toCollection(linkedSetOf()),
-                gameModes = (storeMetadata?.gameModes.orEmpty() + request.gameModes).toCollection(linkedSetOf()),
+                gameModes = (storeMetadata?.gameModes.orEmpty() + request.gameModes.orEmpty()).toCollection(linkedSetOf()),
             ),
         )
         request.releaseDate?.let { date -> game.platforms.forEach { releaseRepository.save(toRelease(game, it, date)) } }
@@ -454,8 +485,10 @@ class CatalogSyncService(
             slug = slug,
             originalTitle = item.title,
             title = item.title,
-            tagline = "${item.releaseDate.year}년 신작 · 최신 출시 일정",
-            description = "Wikidata CC0 구조화 데이터에서 확인한 ${item.releaseDate.year}년 게임입니다. 공식 채널의 발표와 업데이트가 연결되면 일정과 상세 정보를 계속 보강합니다.",
+            tagline = storeCopy[item.wikidataId]?.second?.take(240)
+                ?: "${item.releaseDate.year}년 신작 · 최신 출시 일정",
+            description = storeCopy[item.wikidataId]?.first
+                ?: "Wikidata CC0 구조화 데이터에서 확인한 ${item.releaseDate.year}년 게임입니다. 공식 채널의 발표와 업데이트가 연결되면 일정과 상세 정보를 계속 보강합니다.",
             developer = developer,
             publisher = publisher,
             releaseDate = item.releaseDate,
@@ -508,5 +541,9 @@ class CatalogSyncService(
         const val MAX_MAGAZINE_SUBSCRIPTIONS = 50
         const val MAX_STEAM_DETAILS_PER_SYNC = 24
         const val STEAM_FAILURE_CUTOFF = 5
+        val BOILERPLATE_MARKERS = listOf(
+            "Wikidata CC0 구조화 데이터에서 확인한", "에서 확인한 정보입니다",
+            "년 신작 · 최신 출시 일정", "주목할 신작",
+        )
     }
 }
