@@ -7,6 +7,8 @@ import com.rubion.nexplaybe.catalog.CatalogSyncSummary
 import com.rubion.nexplaybe.catalog.ClassificationEnrichmentSummary
 import com.rubion.nexplaybe.collector.CollectorSummary
 import com.rubion.nexplaybe.metadata.RichMetadataSyncSummary
+import com.rubion.nexplaybe.wikipedia.WikipediaDescriptionService
+import com.rubion.nexplaybe.wikipedia.WikipediaSyncSummary
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.beans.factory.annotation.Value
@@ -19,6 +21,7 @@ class DailyContentSyncScheduler(
     private val catalogSyncService: CatalogSyncService,
     private val steamNewsCollector: SteamNewsCollector,
     private val richMetadataIngestionService: RichMetadataIngestionService,
+    private val wikipediaDescriptionService: WikipediaDescriptionService,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -41,14 +44,16 @@ class DailyContentSyncScheduler(
         val extended = step("steam-extended", RichMetadataSyncSummary("FAILED", 0, 0, 0)) { richMetadataIngestionService.enrichFromSteam() }
         val snapshots = step("popularity-snapshot", 0) { richMetadataIngestionService.snapshotPopularity() }
         val relations = step("wikidata-relations", RichMetadataSyncSummary("FAILED", 0, 0, 0)) { richMetadataIngestionService.enrichWikidataRelations() }
+        val wiki = step("wikipedia-descriptions", WikipediaSyncSummary("FAILED", 0, 0, 0)) { wikipediaDescriptionService.enrichDescriptions() }
         val news = step("steam-news", CollectorSummary("FAILED", 0, 0, 0, 0, emptyList())) { steamNewsCollector.collect() }
         log.info(
-            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, errors={}",
+            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, errors={}",
             catalogs.joinToString { "${it.year}:${it.status}" },
             catalogs.sumOf { it.inserted },
             refreshed,
             enrichment.enriched,
             extended.enriched,
+            wiki.filled,
             relations.enriched,
             snapshots,
             news.status,

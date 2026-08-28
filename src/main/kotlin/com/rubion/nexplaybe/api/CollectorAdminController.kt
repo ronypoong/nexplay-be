@@ -10,6 +10,7 @@ import com.rubion.nexplaybe.catalog.ManualGameRequest
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
 import com.rubion.nexplaybe.source.SourceRepository
+import com.rubion.nexplaybe.wikipedia.WikipediaDescriptionService
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -40,7 +41,13 @@ class CollectorAdminController(
     private val sourceRepository: SourceRepository,
     private val subscriptionRepository: SourceSubscriptionRepository,
     private val editorPickService: EditorPickService,
+    private val wikipediaDescriptionService: WikipediaDescriptionService,
 ) {
+    /** Steam 이 못 채운 소개를 위키백과로 메운다. */
+    @PostMapping("/catalog/wikipedia/descriptions")
+    fun enrichWikipediaDescriptions(@RequestParam(defaultValue = "200") limit: Int) =
+        wikipediaDescriptionService.enrichDescriptions(limit)
+
     /** 출처를 명시한 수동 카탈로그 등록. 스토어 페이지가 없는 미발표 대작을 넣을 때 쓴다. */
     @PostMapping("/catalog/games")
     fun addGame(@RequestBody request: ManualGameRequest) = catalogSyncService.addGame(request)
