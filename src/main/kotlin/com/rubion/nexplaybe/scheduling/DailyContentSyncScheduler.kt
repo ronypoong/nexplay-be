@@ -5,6 +5,9 @@ import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.catalog.CatalogSyncService
 import com.rubion.nexplaybe.intelligence.EventIntelligenceService
 import com.rubion.nexplaybe.intelligence.ExtractionSummary
+import com.rubion.nexplaybe.intelligence.PromiseLedgerService
+import com.rubion.nexplaybe.intelligence.PromiseSyncSummary
+import com.rubion.nexplaybe.intelligence.ResolutionSummary
 import com.rubion.nexplaybe.collector.SteamNewsCollector
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.catalog.CatalogSyncSummary
@@ -28,6 +31,7 @@ class DailyContentSyncScheduler(
     private val wikipediaDescriptionService: WikipediaDescriptionService,
     private val gameAwardService: GameAwardService,
     private val eventIntelligenceService: EventIntelligenceService,
+    private val promiseLedgerService: PromiseLedgerService,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -54,8 +58,11 @@ class DailyContentSyncScheduler(
         val awards = step("game-awards", AwardSyncSummary("FAILED", 0, 0, 0)) { gameAwardService.sync() }
         val news = step("steam-news", CollectorSummary("FAILED", 0, 0, 0, 0, emptyList())) { steamNewsCollector.collect() }
         val extraction = step("event-extraction", ExtractionSummary("FAILED", 0, 0, 0)) { eventIntelligenceService.extract() }
+        val promises = step("promise-extraction", PromiseSyncSummary("FAILED", 0, 0, 0)) { promiseLedgerService.extractPromises() }
+        // 채점은 모델 없이도 돌아야 한다. 추출이 실패해도 어제까지 적힌 약속은 오늘 채점된다.
+        val resolutions = step("promise-resolution", ResolutionSummary(0, 0, 0, 0, 0)) { promiseLedgerService.resolve() }
         log.info(
-            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, awards={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, extractedEvents={}, errors={}",
+            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, awards={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, extractedEvents={}, promisesFound={}, promisesResolved={}, errors={}",
             catalogs.joinToString { "${it.year}:${it.status}" },
             catalogs.sumOf { it.inserted },
             refreshed,
@@ -68,6 +75,8 @@ class DailyContentSyncScheduler(
             news.status,
             news.newEvents,
             extraction.extracted,
+            promises.promisesFound,
+            resolutions.evaluated,
             news.errors.size,
         )
     }

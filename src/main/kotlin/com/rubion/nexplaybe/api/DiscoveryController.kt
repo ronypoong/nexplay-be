@@ -2,6 +2,7 @@ package com.rubion.nexplaybe.api
 
 import com.rubion.nexplaybe.discovery.DiscoveryService
 import com.rubion.nexplaybe.editorial.EditorPickService
+import com.rubion.nexplaybe.intelligence.PromiseQueryService
 import com.rubion.nexplaybe.korean.KoreanSupportService
 import com.rubion.nexplaybe.metadata.ExtendedGameMetadataService
 import com.rubion.nexplaybe.awards.GameAwardService
@@ -24,7 +25,16 @@ class DiscoveryController(
     private val koreanSupportService: KoreanSupportService,
     private val trendService: TrendService,
     private val gameAwardService: GameAwardService,
+    private val promiseQueryService: PromiseQueryService,
 ) {
+    /** 약속과 결과의 대조표: 퍼블리셔별 신뢰도와 실제로 밀린 기록. */
+    @GetMapping("/promises")
+    fun promises() = promiseQueryService.ledger()
+
+    /** 한 게임이 지금까지 한 약속과 그 결말. */
+    @GetMapping("/promises/{slug}")
+    fun promisesForGame(@PathVariable slug: String) = promiseQueryService.forGame(slug)
+
     /** GOTY 수상·후보 아카이브와, 이력에 근거한 올해 관측 대상. */
     @GetMapping("/goty")
     fun goty() = gameAwardService.goty()

@@ -11,6 +11,7 @@ import com.rubion.nexplaybe.catalog.ManualGameRequest
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
 import com.rubion.nexplaybe.intelligence.EventIntelligenceService
+import com.rubion.nexplaybe.intelligence.PromiseLedgerService
 import com.rubion.nexplaybe.source.SourceRepository
 import com.rubion.nexplaybe.wikipedia.WikipediaDescriptionService
 import org.springframework.web.bind.annotation.GetMapping
@@ -46,11 +47,21 @@ class CollectorAdminController(
     private val wikipediaDescriptionService: WikipediaDescriptionService,
     private val gameAwardService: GameAwardService,
     private val eventIntelligenceService: EventIntelligenceService,
+    private val promiseLedgerService: PromiseLedgerService,
 ) {
     /** 수집한 뉴스를 모델이 읽고 분류·구조화한다. 키가 없으면 SKIPPED 를 돌려준다. */
     @PostMapping("/events/extract")
     fun extractEvents(@RequestParam(defaultValue = "100") limit: Int) =
         eventIntelligenceService.extract(limit)
+
+    /** 발표 원문에서 "앞으로 하겠다"는 약속만 뽑아 대조표에 적는다. */
+    @PostMapping("/promises/extract")
+    fun extractPromises(@RequestParam(defaultValue = "100") limit: Int) =
+        promiseLedgerService.extractPromises(limit)
+
+    /** 적힌 약속을 실제 출시일·언어 이력과 대조해 채점한다. 모델을 쓰지 않는다. */
+    @PostMapping("/promises/resolve")
+    fun resolvePromises() = promiseLedgerService.resolve()
 
     @PostMapping("/awards/sync")
     fun syncAwards() = gameAwardService.sync()
