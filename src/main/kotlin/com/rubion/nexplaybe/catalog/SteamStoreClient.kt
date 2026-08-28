@@ -44,9 +44,20 @@ class SteamStoreClient(
     private val httpClient = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val objectMapper = jacksonObjectMapper()
 
-    fun fetchDetails(appId: Long): SteamStoreMetadata? {
+    /**
+     * 한국 스토어를 먼저 본다. 가격과 등급은 지역마다 다르므로 한국 값이 맞다.
+     *
+     * 한국에 아직 안 올라온 게임은 `success: false` 가 온다. 그럴 때 미국 스토어를
+     * 한 번 더 본다 — 대표 이미지·소개문·장르는 지역과 무관한데, 한국에서 막혔다는
+     * 이유로 통째로 비워 두면 화면에 사진 없는 카드만 남는다. 실제로 사진 없는
+     * 게임 11개 중 9개가 이 경우였다.
+     */
+    fun fetchDetails(appId: Long): SteamStoreMetadata? =
+        fetchDetails(appId, "kr") ?: fetchDetails(appId, "us")
+
+    private fun fetchDetails(appId: Long, country: String): SteamStoreMetadata? {
         val request = HttpRequest.newBuilder(
-            URI.create("https://store.steampowered.com/api/appdetails?appids=$appId&l=korean&cc=kr"),
+            URI.create("https://store.steampowered.com/api/appdetails?appids=$appId&l=korean&cc=$country"),
         )
             .timeout(timeout)
             .header("Accept", "application/json")
