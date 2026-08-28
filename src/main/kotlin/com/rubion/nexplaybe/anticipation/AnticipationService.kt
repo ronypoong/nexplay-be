@@ -12,7 +12,13 @@ data class AnticipationState(
     /** 눌린 수. 아직 적을 때는 null 이다 — 아래 주석 참고. */
     val count: Int?,
     val mine: Boolean,
+    /** 내가 적어 둔 이유. 다시 열었을 때 고칠 수 있어야 한다. */
+    val myReason: String? = null,
+    val reasons: List<AnticipationReason> = emptyList(),
 )
+
+/** 왜 기대하는지 한 줄. 누가 썼는지는 우리도 모른다 — 해시만 있고 이름이 없다. */
+data class AnticipationReason(val reason: String, val writtenAt: String)
 
 data class AnticipatedGame(val slug: String, val title: String, val releaseLabel: String, val count: Int)
 
@@ -33,14 +39,25 @@ data class AnticipatedGame(val slug: String, val title: String, val releaseLabel
 @Service
 class AnticipationService(
     private val jdbc: JdbcTemplate,
+    private val profanity: ProfanityFilter,
     @param:Value("\${nexplay.anticipation.salt:}") private val salt: String,
     @param:Value("\${nexplay.anticipation.daily-limit:40}") private val dailyLimit: Int,
 ) {
 
     @Transactional
-    fun toggle(slug: String, clientIp: String): AnticipationState {
+    fun toggle(slug: String, clientIp: String, reason: String? = null): AnticipationState {
         val gameId = gameIdOf(slug)
         val hash = voterHash(clientIp)
+        val cleaned = cleanReason(reason)
+
+        // 이유만 고치는 경우다. 이미 눌러 둔 것을 끄면 안 된다.
+        if (cleaned != null) {
+            val updated = jdbc.update(
+                "UPDATE game_anticipation SET reason = ?, reason_at = CURRENT_TIMESTAMP(6) WHERE game_id = ? AND voter_hash = ?",
+                cleaned, gameId, hash,
+            )
+            if (updated > 0) return state(slug, clientIp)
+        }
 
         val removed = jdbc.update(
             "DELETE FROM game_anticipation WHERE game_id = ? AND voter_hash = ?", gameId, hash,
@@ -53,7 +70,11 @@ class AnticipationService(
             ) ?: 0
             if (today >= dailyLimit) throw TooManyVotesException()
             jdbc.update(
-                "INSERT IGNORE INTO game_anticipation (game_id, voter_hash) VALUES (?,?)", gameId, hash,
+                """
+                INSERT IGNORE INTO game_anticipation (game_id, voter_hash, reason, reason_at)
+                VALUES (?,?,?,?)
+                """.trimIndent(),
+                gameId, hash, cleaned, cleaned?.let { java.sql.Timestamp.from(java.time.Instant.now()) },
             )
         }
         return state(slug, clientIp)
@@ -72,7 +93,41 @@ class AnticipationService(
                 Int::class.java, gameId, hash,
             ) ?: 0
             ) > 0
-        return AnticipationState(slug, count.takeIf { it >= MIN_COUNT_TO_SHOW }, mine)
+        val myReason = jdbc.query(
+            "SELECT reason FROM game_anticipation WHERE game_id = ? AND voter_hash = ?",
+            { rs, _ -> rs.getString(1) }, gameId, hash,
+        ).firstOrNull()
+
+        // 이유는 수와 달리 문턱을 두지 않는다. 한 줄이라도 그 자체로 읽을 값이 있고,
+        // 통계가 아니라 글이라 "표본이 얇다" 는 말이 적용되지 않는다.
+        val reasons = jdbc.query(
+            """
+            SELECT reason, reason_at FROM game_anticipation
+            WHERE game_id = ? AND reason IS NOT NULL AND reason <> ''
+            ORDER BY reason_at DESC LIMIT ?
+            """.trimIndent(),
+            { rs, _ ->
+                AnticipationReason(rs.getString(1), rs.getTimestamp(2).toInstant().toString().take(10))
+            },
+            gameId, MAX_REASONS,
+        )
+
+        return AnticipationState(slug, count.takeIf { it >= MIN_COUNT_TO_SHOW }, mine, myReason, reasons)
+    }
+
+    /**
+     * 이유 한 줄을 다듬는다.
+     *
+     * 어디가 걸렸는지는 알려주지 않는다 — 우회를 가르쳐 주는 셈이다.
+     * 대신 무엇이 문제인지는 말해 준다.
+     */
+    private fun cleanReason(raw: String?): String? {
+        val text = raw?.trim()?.replace(Regex("\\s+"), " ") ?: return null
+        if (text.isEmpty()) return null
+        require(text.length >= REASON_MIN) { "이유는 ${REASON_MIN}자 이상 적어주세요" }
+        require(text.length <= REASON_MAX) { "이유는 ${REASON_MAX}자까지 적을 수 있어요" }
+        require(profanity.isClean(text)) { "쓸 수 없는 표현이 있어요" }
+        return text
     }
 
     /** 순위는 그 자체로 참여를 부른다. 다만 표본이 얇으면 순위도 거짓말이라 문턱을 둔다. */
@@ -107,6 +162,10 @@ class AnticipationService(
     private companion object {
         /** 이 수를 넘기 전에는 수를 보여 주지 않는다. */
         const val MIN_COUNT_TO_SHOW = 5
+        const val REASON_MIN = 2
+        /** 한 줄이다. 길어지면 댓글이 되고, 댓글이 되면 관리해야 한다. */
+        const val REASON_MAX = 140
+        const val MAX_REASONS = 20
     }
 }
 

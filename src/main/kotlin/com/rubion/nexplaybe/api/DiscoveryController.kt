@@ -14,6 +14,7 @@ import org.springframework.format.annotation.DateTimeFormat
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -40,8 +41,11 @@ class DiscoveryController(
      * 소금을 섞은 IP 해시로 충분하다 — 원본 주소는 저장하지 않는다.
      */
     @PostMapping("/games/{slug}/anticipate")
-    fun toggleAnticipation(@PathVariable slug: String, request: HttpServletRequest) =
-        anticipationService.toggle(slug, clientIpOf(request))
+    fun toggleAnticipation(
+        @PathVariable slug: String,
+        @RequestBody(required = false) body: AnticipateRequest?,
+        request: HttpServletRequest,
+    ) = anticipationService.toggle(slug, clientIpOf(request), body?.reason)
 
     @GetMapping("/games/{slug}/anticipate")
     fun anticipationState(@PathVariable slug: String, request: HttpServletRequest) =
@@ -131,3 +135,6 @@ class DiscoveryController(
         @RequestParam(required = false) genre: String?,
     ) = discoveryService.games(platform, genre, null)
 }
+
+/** 이유는 선택이다. 안 적어도 누를 수 있어야 한다. */
+data class AnticipateRequest(val reason: String? = null)
