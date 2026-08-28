@@ -40,7 +40,7 @@ class PromiseLedgerService(
             LEFT JOIN game_event_source s ON s.game_event_id = e.id
             LEFT JOIN raw_item r ON r.id = s.raw_item_id
             WHERE NOT EXISTS (
-                SELECT 1 FROM game_promise p WHERE p.event_id = e.id AND p.prompt_version = ?
+                SELECT 1 FROM game_promise_scan sc WHERE sc.event_id = e.id AND sc.prompt_version = ?
             )
             GROUP BY e.id, e.game_id, e.title, r.raw_payload, e.summary, e.event_date, g.title
             ORDER BY e.published_at DESC
@@ -68,7 +68,9 @@ class PromiseLedgerService(
                 continue
             }
             consecutiveFailures = 0
-            // 약속이 없는 글이 대부분이다. 빈 결과도 "확인했다" 는 뜻이므로 표시만 남긴다.
+            // 약속이 없는 글이 대부분이다. 빈 결과도 결과이므로 반드시 남긴다.
+            // 안 남기면 다음 실행에서 같은 글을 또 모델에게 보내고, LIMIT 에 걸려
+            // 오래된 글에는 영영 닿지 못한다.
             transactions.execute { store(candidate, extraction) }
             found += extraction.promises.size
         }
@@ -94,6 +96,15 @@ class PromiseLedgerService(
     }
 
     private fun store(candidate: Candidate, extraction: PromiseExtraction) {
+        jdbc.update(
+            """
+            INSERT INTO game_promise_scan (event_id, prompt_version, promises_found, model)
+            VALUES (?,?,?,?)
+            ON DUPLICATE KEY UPDATE promises_found=VALUES(promises_found), model=VALUES(model),
+              scanned_at=CURRENT_TIMESTAMP(6)
+            """.trimIndent(),
+            candidate.eventId, PROMPT_VERSION, extraction.promises.size, model,
+        )
         // 원문을 보관한 소식에서 뽑은 약속만 LIVE 다. 제목만 남은 과거 소식에서 뽑은 것은
         // 근거가 얇으므로 BACKTEST 로 갈라 점수에서 뺀다.
         val provenance = if (candidate.rawPayload.isNullOrBlank()) "BACKTEST" else "LIVE"
