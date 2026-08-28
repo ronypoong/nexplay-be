@@ -144,7 +144,7 @@ class GameAwardService(
             WHERE wikidata_id = ? AND release_date IS NULL
             """.trimIndent(),
             java.sql.Date.valueOf(java.time.LocalDate.of(year, 1, 1)),
-            if (isPast) "${'$'}{year}년 출시" else "${'$'}{year}년 출시 예정",
+            if (isPast) "${year}년 출시" else "${year}년 출시 예정",
             if (isPast) "AVAILABLE" else "UPCOMING",
             wikidataId,
         )
