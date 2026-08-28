@@ -155,17 +155,17 @@ class EventIntelligenceService(
          */
         val EVENT_SCHEMA = Schemas.obj(
             "eventType" to Schemas.enumOf(
-                "이벤트 유형. ANNOUNCEMENT 는 다른 어느 것에도 해당하지 않을 때만 쓴다.",
+                "유형. ANNOUNCEMENT 는 다른 것에 해당하지 않을 때만.",
                 "RELEASE_DATE", "DELAY", "RELEASE", "PATCH", "MAJOR_UPDATE", "DLC", "EXPANSION",
                 "TRAILER", "GAMEPLAY", "DEMO", "BETA", "DISCOUNT", "PREORDER", "ANNOUNCEMENT",
             ),
             "confidence" to Schemas.enumOf("판단 확신도", "HIGH", "MEDIUM", "LOW"),
-            "summaryKo" to Schemas.nullableStr("한국어 한 줄 요약. 원문에 있는 사실만 쓴다. 최대 120자"),
-            "discountPercent" to Schemas.nullableInt("할인율(%). 원문에 명시된 숫자만. 없으면 null"),
+            "summaryKo" to Schemas.nullableStr("한국어 한 줄 요약. 원문의 사실만. 120자 이내"),
+            "discountPercent" to Schemas.nullableInt("할인율(%). 명시된 숫자만, 없으면 null"),
             "mentionedReleaseDate" to Schemas.nullableStr("원문이 언급한 출시일. YYYY-MM-DD 형식만 쓴다. 그 형식으로 못 적으면 null"),
             "hasDemo" to Schemas.bool("체험판/데모 배포를 알리는 글이면 true"),
             "isMarketingNoise" to Schemas.bool("게임 내용과 무관한 마케팅·커뮤니티 잡음이면 true"),
-            "reason" to Schemas.nullableStr("그렇게 분류한 근거를 원문 표현을 인용해 한 문장으로. 최대 200자"),
+            "reason" to Schemas.nullableStr("분류 근거를 원문 인용으로 한 문장. 150자 이내"),
         )
         val SYSTEM_PROMPT = """
             당신은 게임 뉴스를 분류하고 사실을 뽑아내는 일을 합니다.

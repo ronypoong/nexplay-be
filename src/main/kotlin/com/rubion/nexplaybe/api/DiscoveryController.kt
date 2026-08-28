@@ -39,6 +39,7 @@ class DiscoveryController(
     private val anticipationService: AnticipationService,
     private val audienceService: AudienceService,
     private val eventDetailService: EventDetailService,
+    private val gameDetailBundle: com.rubion.nexplaybe.discovery.GameDetailBundle,
 ) {
     /**
      * "기대돼요". 누르면 켜지고 다시 누르면 꺼진다.
@@ -136,6 +137,15 @@ class DiscoveryController(
 
     @GetMapping("/games/{slug}")
     fun game(@PathVariable slug: String) = discoveryService.game(slug)
+
+    /**
+     * 상세 화면이 필요로 하는 것을 한 번에.
+     *
+     * 예전에는 화면 하나에 서버를 여섯 번 불렀다. 조각마다 왕복이 붙으니 그것만으로
+     * 1초가 넘었다. 각 조각은 이미 캐시돼 있으므로 모아 보내는 것이 전부다.
+     */
+    @GetMapping("/games/{slug}/full")
+    fun gameFull(@PathVariable slug: String) = gameDetailBundle.of(slug)
 
     /** 같은 장르 기반 관련작. 상세 화면이 전체 카탈로그를 받지 않도록 서버에서 고른다. */
     @GetMapping("/games/{slug}/related")
