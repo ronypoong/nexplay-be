@@ -27,6 +27,8 @@ data class SteamStoreMetadata(
     val ageRatings: List<SteamAgeRating> = emptyList(),
     val accessibilityFeatures: Set<String> = emptySet(),
     val dlcAppIds: Set<Long> = emptySet(),
+    /** Steam 리뷰 수. 판매량 대리 지표이고, 과거 이력을 공짜로 주는 곳이 없다. */
+    val reviewCount: Long? = null,
 )
 
 data class SteamLanguageSupport(val code: String, val name: String, val text: Boolean, val audio: Boolean)
@@ -87,6 +89,7 @@ class SteamStoreClient(
         val price = priceNode.takeIf { it.isObject && it.path("currency").asText().isNotBlank() }?.let {
             SteamPrice(it.path("currency").asText(), it.path("initial").asLong(), it.path("final").asLong(), it.path("discount_percent").asInt())
         }
+        val reviewCount = data.path("recommendations").path("total").asLong(0).takeIf { it > 0 }
         val ratings = data.path("ratings").fields().asSequence().mapNotNull { (system, node) ->
             node.path("rating").asText().takeIf(String::isNotBlank)?.let { SteamAgeRating(system.uppercase(), it, node.path("descriptors").asText().takeIf(String::isNotBlank)) }
         }.toList()
@@ -98,7 +101,7 @@ class SteamStoreClient(
             name, image, shortDescription, aboutTheGame, genres, platforms, modes, languages, screenshots + movies,
             requirements.path("minimum").asText().takeIf(String::isNotBlank),
             requirements.path("recommended").asText().takeIf(String::isNotBlank),
-            price, ratings, accessibility, dlcIds,
+            price, ratings, accessibility, dlcIds, reviewCount,
         )
     }
 

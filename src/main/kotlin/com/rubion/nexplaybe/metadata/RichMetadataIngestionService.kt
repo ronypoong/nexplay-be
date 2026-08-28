@@ -22,16 +22,33 @@ class RichMetadataIngestionService(
     private val jdbc: JdbcTemplate,
     private val transactions: TransactionTemplate,
     private val catalogSyncService: CatalogSyncService,
+    /**
+     * 며칠 지나면 Steam 을 다시 보는가.
+     *
+     * 예전에는 "한 번도 안 본 게임" 만 골라서, 451건이 완료로 표시된 뒤로는 Steam 을
+     * 영영 다시 부르지 않았다. 가격도 언어 지원도 그 시점에 멈췄다는 뜻이고,
+     * **한국어가 나중에 추가돼도 관측할 방법이 없었다** — 한국어 레이더와 약속
+     * 대조표의 KOREAN_SUPPORT 판정이 통째로 성립하지 않는 상태였다.
+     *
+     * 458건을 하루 200건씩 도니 한 바퀴에 2.3일이다. 3일이면 밀리지 않고 돈다.
+     */
+    @param:org.springframework.beans.factory.annotation.Value("\${nexplay.catalog.steam-store.recheck-after-days:3}")
+    private val recheckAfterDays: Int,
 ) {
 
     private data class SteamGameRef(val id: Long, val title: String, val officialUrl: String?)
     fun enrichFromSteam(limit: Int = DEFAULT_ENRICH_LIMIT): RichMetadataSyncSummary {
         val candidateIds = jdbc.queryForList(
             """
-            SELECT g.id FROM game g WHERE g.steam_app_id IS NOT NULL AND
-              NOT EXISTS (SELECT 1 FROM game_data_provenance p WHERE p.game_id=g.id AND p.field_name='extended_metadata_checked' AND p.source_name='Steam Store')
-            ORDER BY g.featured DESC, g.discovery_score DESC LIMIT ?
-            """.trimIndent(), Long::class.java, limit.coerceIn(1, MAX_ENRICH_LIMIT),
+            SELECT g.id FROM game g
+            LEFT JOIN game_data_provenance p
+              ON p.game_id = g.id AND p.field_name = 'extended_metadata_checked' AND p.source_name = 'Steam Store'
+            WHERE g.steam_app_id IS NOT NULL
+              AND (p.verified_at IS NULL OR p.verified_at < DATE_SUB(NOW(), INTERVAL ? DAY))
+            -- 한 번도 안 본 게임이 먼저다. 그 다음은 가장 오래 안 본 순서.
+            ORDER BY p.verified_at IS NOT NULL, g.featured DESC, g.discovery_score DESC, p.verified_at
+            LIMIT ?
+            """.trimIndent(), Long::class.java, recheckAfterDays, limit.coerceIn(1, MAX_ENRICH_LIMIT),
         ).filterNotNull()
         if (candidateIds.isEmpty()) return RichMetadataSyncSummary("SUCCESS", 0, 0, 0)
         val candidates = gameRepository.findAllForDiscoveryByIds(candidateIds)
@@ -134,6 +151,21 @@ class RichMetadataIngestionService(
                 VALUES (?,?,'DLC',?,?, 'Steam Store',?) ON DUPLICATE KEY UPDATE verified_at=VALUES(verified_at)""",
                 game.id, related.id, related.title, related.officialUrl, now,
             )
+        }
+        // 리뷰 수는 값이 바뀌었을 때만 한 줄 남긴다. 매일 같은 값을 넣으면 그래프에
+        // 가짜 평평한 구간이 생기고, 관측한 것과 반복한 것을 구분할 수 없게 된다.
+        data.reviewCount?.let { count ->
+            val previous = jdbc.query(
+                "SELECT steam_review_count FROM game WHERE id = ?",
+                { rs, _ -> rs.getLong(1).takeUnless { rs.wasNull() } }, game.id,
+            ).firstOrNull()
+            if (previous != count) {
+                jdbc.update("UPDATE game SET steam_review_count = ? WHERE id = ?", count, game.id)
+                jdbc.update(
+                    "INSERT IGNORE INTO game_review_history (game_id, review_count, observed_at) VALUES (?,?,?)",
+                    game.id, count, now,
+                )
+            }
         }
         listOf("languages", "media", "game_modes", "requirements", "price", "age_rating", "accessibility", "extended_metadata_checked").forEach { field ->
             jdbc.update(

@@ -95,6 +95,8 @@ nexplay:
   catalog:
     steam-store:
       timeout-seconds: 12
+      # 며칠 지나면 Steam 을 다시 보는가. 458건을 하루 200건씩 도니 한 바퀴가 2.3일이다.
+      recheck-after-days: ${NEXPLAY_STEAM_RECHECK_DAYS:3}
     wikidata:
       timeout-seconds: 60
       max-rows: 500
