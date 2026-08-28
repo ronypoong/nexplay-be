@@ -60,23 +60,32 @@ class GameAwardService(
         // 카탈로그에 없는 수상작은 아카이브 전용으로 넣는다. 신작 화면에는 나오지 않는다.
         var added = 0
         records.map { it.wikidataId to it }.distinctBy { it.first }.forEach { (wikidataId, record) ->
+            val developer = record.developer ?: record.publisher ?: "Unknown"
+            val publisher = record.publisher ?: record.developer ?: "Unknown"
             val exists = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM game WHERE wikidata_id = ?", Int::class.java, wikidataId,
             ) ?: 0
-            if (exists > 0) return@forEach
+            if (exists > 0) {
+                // 앞선 동기화가 개발사를 Unknown 으로 넣어둔 것이 있다. 이력 매칭이
+                // 개발사를 타고 이뤄지므로 Unknown 이면 관측 대상이 하나도 안 잡힌다.
+                if (record.developer != null) backfillCompanies(wikidataId, developer, publisher)
+                return@forEach
+            }
             val result = runCatching {
                 catalogSyncService.addGame(
                     ManualGameRequest(
                         title = record.title,
-                        developer = "Unknown",
-                        publisher = "Unknown",
+                        developer = developer,
+                        publisher = publisher,
                         steamAppId = record.steamAppId,
                         wikidataId = wikidataId,
                     ),
                 )
             }.getOrNull()
             if (result?.status == "SUCCESS") {
-                jdbc.update("UPDATE game SET archive_only = b'1' WHERE wikidata_id = ?", wikidataId)
+                // 아직 안 나온 기대작까지 아카이브로 묻으면 안 된다. 그건 지금 볼 작품이다.
+                val isPast = record.releaseYear != null && record.releaseYear < java.time.LocalDate.now().year
+                if (isPast) jdbc.update("UPDATE game SET archive_only = b'1' WHERE wikidata_id = ?", wikidataId)
                 added++
             }
         }
@@ -119,6 +128,25 @@ class GameAwardService(
         )
     }
 
+    /** 옛 동기화가 남긴 Unknown 개발사를 실제 이름으로 채운다. */
+    private fun backfillCompanies(wikidataId: String, developer: String, publisher: String) {
+        transactions.execute {
+            listOf("developer_id" to developer, "publisher_id" to publisher).forEach { (column, name) ->
+                jdbc.update("INSERT IGNORE INTO company (slug, name, type) VALUES (?, ?, 'UNKNOWN')",
+                    name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "company-${name.hashCode()}" }, name)
+                jdbc.update(
+                    """
+                    UPDATE game g JOIN company c ON c.name = ?
+                    SET g.$column = c.id
+                    WHERE g.wikidata_id = ?
+                      AND (SELECT name FROM company WHERE id = g.$column) = 'Unknown'
+                    """.trimIndent(),
+                    name, wikidataId,
+                )
+            }
+        }
+    }
+
     /** 예측이 아니라 이력이다. 왜 목록에 있는지 reason 으로 밝힌다. */
     private fun watchlist(limit: Int = 12): List<WatchlistEntry> {
         val anticipated = jdbc.query(
@@ -126,7 +154,7 @@ class GameAwardService(
             SELECT g.slug, g.title, g.release_label, g.cover_image_url, a.award_year
             FROM game_award a JOIN game g ON g.id = a.game_id
             WHERE a.award_name = 'The Game Awards Most Anticipated Game'
-              AND g.archive_only = b'0' AND g.status <> 'AVAILABLE'
+              AND g.status <> 'AVAILABLE'
             ORDER BY a.award_year DESC
             """.trimIndent(),
             RowMapper { rs, _ ->

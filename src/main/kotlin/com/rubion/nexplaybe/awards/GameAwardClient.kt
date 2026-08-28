@@ -16,6 +16,9 @@ data class AwardRecord(
     val result: String,
     val awardYear: Int,
     val steamAppId: Long?,
+    val developer: String?,
+    val publisher: String?,
+    val releaseYear: Int?,
 )
 
 /**
@@ -37,12 +40,15 @@ class GameAwardClient(
 
     private fun fetch(awardEntity: String, awardName: String): List<AwardRecord> {
         val query = """
-            SELECT ?game ?gameLabel ?kind ?awardYear ?steam WHERE {
+            SELECT ?game ?gameLabel ?kind ?awardYear ?steam ?devLabel ?pubLabel ?releaseYear WHERE {
               { ?game p:P166 ?st . ?st ps:P166 wd:$awardEntity . BIND("WINNER" AS ?kind) }
               UNION
               { ?game p:P1411 ?st . ?st ps:P1411 wd:$awardEntity . BIND("NOMINEE" AS ?kind) }
               OPTIONAL { ?st pq:P585 ?t . BIND(YEAR(?t) AS ?awardYear) }
               OPTIONAL { ?game wdt:P1733 ?steam }
+              OPTIONAL { ?game wdt:P178 ?dev }
+              OPTIONAL { ?game wdt:P123 ?pub }
+              OPTIONAL { ?game wdt:P577 ?rd . BIND(YEAR(?rd) AS ?releaseYear) }
               SERVICE wikibase:label { bd:serviceParam wikibase:language "ko,en". }
             }
         """.trimIndent()
@@ -70,6 +76,9 @@ class GameAwardClient(
             records += AwardRecord(
                 wikidataId, title, awardName, result, year,
                 row.path("steam").path("value").asText().toLongOrNull(),
+                row.path("devLabel").path("value").asText().takeIf { it.isNotBlank() && !it.matches(Regex("Q\\d+")) },
+                row.path("pubLabel").path("value").asText().takeIf { it.isNotBlank() && !it.matches(Regex("Q\\d+")) },
+                row.path("releaseYear").path("value").asText().toIntOrNull(),
             )
         }
         return records
