@@ -36,6 +36,26 @@ data class CatalogSyncSummary(
     val error: String? = null,
 )
 
+/**
+ * Wikidata 출시연도 + Steam 검증만으로 카탈로그를 만들면, 아직 스토어 페이지가 없거나
+ * 출시일이 발표되지 않은 대작은 통째로 빠진다. 실제로 한국 개발사 게임이 455개 중 6개뿐이었다.
+ * 출처(Steam appId 또는 Wikidata Q번호)를 명시해 직접 넣을 수 있는 경로를 둔다.
+ */
+data class ManualGameRequest(
+    val title: String,
+    val developer: String,
+    val publisher: String,
+    val steamAppId: Long? = null,
+    val wikidataId: String? = null,
+    val releaseDate: LocalDate? = null,
+    val officialUrl: String? = null,
+    val tagline: String? = null,
+    val description: String? = null,
+    val genres: Set<String> = emptySet(),
+    val platforms: Set<String> = emptySet(),
+    val gameModes: Set<String> = emptySet(),
+)
+
 data class StoreEnrichmentSummary(
     val status: String,
     val candidates: Int,
@@ -323,6 +343,67 @@ class CatalogSyncService(
         if (game.platforms == platformsBefore) return
         releaseRepository.deleteAllByGameId(game.id)
         game.platforms.forEach { platform -> releaseRepository.save(toRelease(game, platform, releaseDate)) }
+    }
+
+    /**
+     * 출처를 명시한 수동 등록. steamAppId 가 있으면 제목·이미지·장르를 스토어에서 다시 확인해 덮어쓴다.
+     * 출시일을 모르면 TBA 로 둔다 — 모르는 것을 아는 척하지 않는다.
+     */
+    fun addGame(request: ManualGameRequest): CatalogSyncSummary {
+        require(request.steamAppId != null || request.wikidataId != null) {
+            "steamAppId 또는 wikidataId 중 하나는 있어야 합니다. 출처 없는 게임은 넣지 않습니다."
+        }
+        request.wikidataId?.let { id ->
+            require(id.matches(Regex("Q\\d+"))) { "wikidataId 형식이 올바르지 않습니다: $id" }
+            gameRepository.findByWikidataId(id)?.let { return CatalogSyncSummary("ALREADY_EXISTS", 0, 1, 0, 0) }
+        }
+        val storeMetadata = request.steamAppId?.let { appId -> runCatching { steamStoreClient.fetchDetails(appId) }.getOrNull() }
+        val today = LocalDate.now()
+        val title = storeMetadata?.name ?: request.title
+        val developer = resolveCompany(CatalogCompanyRef(null, request.developer), CompanyType.DEVELOPER).first
+        val publisher = resolveCompany(CatalogCompanyRef(null, request.publisher), CompanyType.PUBLISHER).first
+        var slug = slugify(title)
+        if (gameRepository.findBySlug(slug) != null) slug += "-${request.wikidataId?.lowercase() ?: request.steamAppId}"
+        val genres = (storeMetadata?.genres.orEmpty() + request.genres).ifEmpty { setOf("미분류") }
+        val platforms = (storeMetadata?.platforms.orEmpty() + request.platforms).ifEmpty { setOf("미정") }
+        val colors = colorsFor(request.wikidataId ?: request.steamAppId.toString())
+        val game = gameRepository.save(
+            Game(
+                slug = slug,
+                originalTitle = request.title,
+                title = title,
+                tagline = request.tagline ?: "주목할 신작",
+                description = request.description
+                    ?: "${storeMetadata?.let { "Steam 스토어" } ?: "Wikidata"}에서 확인한 정보입니다. 공식 발표가 연결되면 일정과 상세 정보를 계속 보강합니다.",
+                developer = developer,
+                publisher = publisher,
+                releaseDate = request.releaseDate,
+                officialUrl = request.officialUrl,
+                steamAppId = request.steamAppId,
+                wikidataId = request.wikidataId,
+                catalogSource = if (storeMetadata != null) "STEAM_STOREFRONT_API" else "WIKIDATA_CC0",
+                coverImageUrl = storeMetadata?.headerImageUrl,
+                imageSource = storeMetadata?.let { "STEAM_STOREFRONT_API" },
+                releaseLabel = request.releaseDate?.let { releaseLabelFor(it, today) } ?: "출시일 미정",
+                status = when {
+                    request.releaseDate == null -> GameStatus.TBA
+                    isStillUpcoming(request.releaseDate, today) -> GameStatus.UPCOMING
+                    else -> GameStatus.AVAILABLE
+                },
+                discoveryScore = BigDecimal.valueOf(95),
+                anticipationScore = BigDecimal.valueOf(98),
+                followerCount = 0,
+                accent = colors.first,
+                accentSecondary = colors.second,
+                symbol = title.filter(Char::isLetterOrDigit).take(2).uppercase().ifBlank { "✦" },
+                featured = false,
+                genres = genres.toCollection(linkedSetOf()),
+                platforms = platforms.toCollection(linkedSetOf()),
+                gameModes = (storeMetadata?.gameModes.orEmpty() + request.gameModes).toCollection(linkedSetOf()),
+            ),
+        )
+        request.releaseDate?.let { date -> game.platforms.forEach { releaseRepository.save(toRelease(game, it, date)) } }
+        return CatalogSyncSummary("SUCCESS", request.releaseDate?.year ?: 0, 1, 1, 0)
     }
 
     private fun resolveCompany(ref: CatalogCompanyRef?, type: CompanyType): Pair<Company, Int> {

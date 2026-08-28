@@ -6,6 +6,7 @@ import com.rubion.nexplaybe.collector.SteamNewsCollector
 import com.rubion.nexplaybe.editorial.EditorPickRequest
 import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.catalog.CatalogSyncService
+import com.rubion.nexplaybe.catalog.ManualGameRequest
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
 import com.rubion.nexplaybe.source.SourceRepository
@@ -40,6 +41,10 @@ class CollectorAdminController(
     private val subscriptionRepository: SourceSubscriptionRepository,
     private val editorPickService: EditorPickService,
 ) {
+    /** 출처를 명시한 수동 카탈로그 등록. 스토어 페이지가 없는 미발표 대작을 넣을 때 쓴다. */
+    @PostMapping("/catalog/games")
+    fun addGame(@RequestBody request: ManualGameRequest) = catalogSyncService.addGame(request)
+
     @PostMapping("/editor-picks")
     fun addEditorPick(@RequestBody request: EditorPickRequest) = editorPickService.upsert(request)
 
