@@ -109,3 +109,13 @@ Railway 는 Dockerfile 로 빌드합니다(`railway.json`). Nixpacks 기본 실�
 
 - 프론트엔드 `https://nexplay.rubi-on.com`
 - 백엔드 `https://nexplay-api.rubi-on.com`
+
+## 라이선스
+
+**Copyright (c) 2026 RUBI-ON. All rights reserved.**
+
+소스를 공개해 두었지만 오픈소스는 아닙니다. 열람과 학습은 자유롭게 하셔도 되고,
+복제·개작·배포·서비스 운영은 사전 서면 허락이 필요합니다. 전문은 [`LICENSE`](./LICENSE)에 있습니다.
+
+수집·표시하는 데이터의 권리는 각 출처(Wikidata CC0, Wikipedia CC BY-SA, Steam,
+각 게임사)에 있으며 위 조건이 아니라 각 출처의 라이선스를 따릅니다.

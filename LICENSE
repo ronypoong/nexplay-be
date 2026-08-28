@@ -1,0 +1,46 @@
+Copyright (c) 2026 RUBI-ON. All rights reserved.
+
+이 저장소의 소스 코드에 대한 모든 권리는 저작권자에게 있습니다.
+This repository is source-available, not open source.
+
+허용되는 것 / What you may do
+  - 소스를 열람하고 학습 목적으로 읽는 것
+  - Reading and studying the source code
+
+허용되지 않는 것 / What you may not do
+  저작권자의 사전 서면 허락 없이 아래를 할 수 없습니다.
+  Without prior written permission from the copyright holder, you may not:
+  - 복제, 배포, 전송, 공중송신
+    copy, distribute, or publish
+  - 2차적 저작물 작성, 개작, 통합
+    modify, adapt, or create derivative works
+  - 상업적·비상업적 이용을 불문한 사용
+    use in any product or service, commercial or not
+  - 서비스 운영에 사용
+    deploy or operate as a service
+
+저장소가 공개되어 있다는 사실이 위 권리를 허락하는 것은 아닙니다.
+Public visibility of this repository does not grant any of the rights above.
+
+────────────────────────────────────────────────────────────────────
+
+제3자 자료 / Third-party material
+
+이 소프트웨어가 수집·표시하는 데이터의 권리는 각 출처에 있으며,
+위 조건이 아니라 각 출처의 라이선스를 따릅니다.
+
+Data collected or displayed by this software belongs to its sources and
+is governed by their licenses, not by the terms above:
+
+  - Wikidata          CC0 1.0
+  - Wikipedia         CC BY-SA 4.0
+  - Steam             Valve Corporation의 약관 / Valve Corporation terms
+  - 게임 제목·이미지·발표문   각 게임사 및 권리자
+    game titles, artwork, announcements — respective publishers and rights holders
+
+이 저장소가 의존하는 오픈소스 라이브러리는 각자의 라이선스를 따릅니다.
+Open-source dependencies remain under their own licenses.
+
+────────────────────────────────────────────────────────────────────
+
+문의 / Contact: contact@rubi-on.com
