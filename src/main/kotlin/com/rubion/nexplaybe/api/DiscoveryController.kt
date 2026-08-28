@@ -4,6 +4,7 @@ import com.rubion.nexplaybe.discovery.DiscoveryService
 import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.intelligence.PromiseQueryService
 import com.rubion.nexplaybe.korean.KoreanSupportService
+import com.rubion.nexplaybe.scheduling.SyncStatusService
 import com.rubion.nexplaybe.metadata.ExtendedGameMetadataService
 import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.trends.TrendService
@@ -26,7 +27,17 @@ class DiscoveryController(
     private val trendService: TrendService,
     private val gameAwardService: GameAwardService,
     private val promiseQueryService: PromiseQueryService,
+    private val syncStatusService: SyncStatusService,
 ) {
+    /**
+     * 수집이 살아 있는지. 마지막 갱신 시각과 단계별 결과를 준다.
+     *
+     * 공개로 둔다. 언제 갱신됐는지는 데이터 서비스에서 신뢰의 근거이고,
+     * 여기에 비밀은 없다.
+     */
+    @GetMapping("/status")
+    fun status() = syncStatusService.status()
+
     /** 약속과 결과의 대조표: 퍼블리셔별 신뢰도와 실제로 밀린 기록. */
     @GetMapping("/promises")
     fun promises() = promiseQueryService.ledger()

@@ -34,13 +34,15 @@ class DailyContentSyncScheduler(
     private val eventIntelligenceService: EventIntelligenceService,
     private val promiseLedgerService: PromiseLedgerService,
     private val readCacheEvictor: ReadCacheEvictor,
+    private val syncRunRecorder: SyncRunRecorder,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    private fun <T> step(name: String, fallback: T, action: () -> T): T = runCatching(action)
-        .onFailure { log.error("NEXPLAY daily sync step failed: {}", name, it) }
-        .getOrDefault(fallback)
+    // 각 단계를 격리하고, 무엇이 돌았고 무엇이 실패했는지 남긴다. 로그만 남기면
+    // 아무도 보지 않아, 며칠째 멈춰 있어도 알 수 없다.
+    private fun <T> step(name: String, fallback: T, action: () -> T): T =
+        syncRunRecorder.record(name, fallback, action)
 
     @Scheduled(
         cron = "\${nexplay.daily-sync.cron:0 0 6 * * *}",
