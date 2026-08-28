@@ -26,6 +26,7 @@ import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.absoluteValue
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.transaction.annotation.Transactional
 
 data class CatalogSyncSummary(
     val status: String,
@@ -444,6 +445,38 @@ class CatalogSyncService(
         )
         request.releaseDate?.let { date -> game.platforms.forEach { releaseRepository.save(toRelease(game, it, date)) } }
         return CatalogSyncSummary("SUCCESS", request.releaseDate?.year ?: 0, 1, 1, 0)
+    }
+
+    /** 대표 이미지가 비어 있는 게임. 자동으로 못 채운 것만 남는다. */
+    @Transactional(readOnly = true)
+    fun gamesMissingCover(): List<Map<String, Any?>> = jdbc.queryForList(
+        """
+        SELECT slug, title, steam_app_id, wikidata_id, discovery_score
+        FROM game
+        WHERE archive_only = 0 AND (cover_image_url IS NULL OR cover_image_url = '')
+        ORDER BY discovery_score DESC, title
+        """.trimIndent(),
+    )
+
+    /**
+     * 대표 이미지를 손으로 지정한다.
+     *
+     * 자동 수집은 이미 값이 있으면 덮지 않으므로, 한 번 넣으면 유지된다.
+     * 어디서 온 값인지 남긴다 — 나중에 "이건 어디서 왔지" 를 물을 수 있어야 한다.
+     */
+    @Transactional
+    fun setCoverImage(slug: String, url: String): Map<String, Any?> {
+        require(url.startsWith("https://")) { "이미지 주소는 https 로 시작해야 합니다" }
+        require(url.length <= 700) { "이미지 주소가 너무 깁니다" }
+        val updated = jdbc.update("UPDATE game SET cover_image_url = ? WHERE slug = ?", url, slug)
+        if (updated == 0) throw com.rubion.nexplaybe.discovery.ResourceNotFoundException("Game not found: $slug")
+        jdbc.update(
+            """INSERT INTO game_data_provenance (game_id,field_name,source_name,source_url,confidence,verified_at)
+            SELECT id,'cover_image','Manual',?,'HIGH',NOW() FROM game WHERE slug = ?
+            ON DUPLICATE KEY UPDATE source_url=VALUES(source_url), verified_at=VALUES(verified_at)""",
+            url, slug,
+        )
+        return mapOf("slug" to slug, "coverImageUrl" to url)
     }
 
     private fun resolveCompany(ref: CatalogCompanyRef?, type: CompanyType): Pair<Company, Int> {

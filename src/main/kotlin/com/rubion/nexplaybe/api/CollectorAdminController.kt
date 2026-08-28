@@ -116,6 +116,20 @@ class CollectorAdminController(
         @RequestParam(defaultValue = "false") includeComplete: Boolean,
     ) = catalogSyncService.enrichWikidataClassifications(limit, includeComplete)
 
+    /**
+     * 대표 이미지가 비어 있는 게임.
+     *
+     * Steam 에 없거나 어느 지역에서도 안 열리는 게임은 자동으로 채울 방법이 없다.
+     * 그런 것만 추려 손으로 넣을 수 있게 한다.
+     */
+    @GetMapping("/catalog/games/missing-cover")
+    fun gamesMissingCover() = catalogSyncService.gamesMissingCover()
+
+    /** 대표 이미지를 손으로 지정한다. 자동 수집은 이미 있는 값을 덮지 않는다. */
+    @PostMapping("/catalog/games/{slug}/cover")
+    fun setCover(@PathVariable slug: String, @RequestBody request: CoverRequest) =
+        catalogSyncService.setCoverImage(slug, request.url)
+
     @GetMapping("/collectors/runs")
     fun recentRuns() = steamNewsCollector.recentRuns().map(CollectorRun::toResponse)
 
@@ -135,3 +149,6 @@ private fun CollectorRun.toResponse() = CollectorRunResponse(
     id, source.name, status.name, startedAt.toString(), finishedAt?.toString(),
     fetchedCount, newItemCount, eventCount, errorMessage,
 )
+
+/** 이미지 주소는 https 여야 한다. 화면이 https 로 열리므로 http 는 브라우저가 막는다. */
+data class CoverRequest(val url: String)
