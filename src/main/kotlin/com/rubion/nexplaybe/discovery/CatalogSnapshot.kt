@@ -9,6 +9,7 @@ import com.rubion.nexplaybe.api.toResponse
 import com.rubion.nexplaybe.game.GameRepository
 import com.rubion.nexplaybe.release.ReleaseRepository
 import com.rubion.nexplaybe.game.GameStatus
+import com.rubion.nexplaybe.popularity.AudienceService
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -51,14 +52,17 @@ class CatalogSnapshot(
     private val gameRepository: GameRepository,
     private val releaseRepository: ReleaseRepository,
     private val awardBadgeLookup: AwardBadgeLookup,
+    private val audienceService: AudienceService,
 ) {
     @Cacheable(CacheConfig.CATALOG)
     @Transactional(readOnly = true)
     fun entries(): List<CatalogEntry> {
         val badges = awardBadgeLookup.badges()
+        // 목록마다 게임 하나씩 세면 N+1 이다. 한 번에 받아 맵으로 쓴다.
+        val audience = audienceService.counts()
         return gameRepository.findAllForDiscovery().map { game ->
             CatalogEntry(
-                card = game.toCardResponse(badges[game.id]),
+                card = game.toCardResponse(badges[game.id], audience[game.id]),
                 id = game.id,
                 slug = game.slug,
                 status = game.status,

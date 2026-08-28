@@ -1,6 +1,7 @@
 package com.rubion.nexplaybe.cache
 
 import com.rubion.nexplaybe.awards.AwardBadgeLookup
+import com.rubion.nexplaybe.popularity.AudienceService
 import com.rubion.nexplaybe.discovery.CatalogSnapshot
 import com.rubion.nexplaybe.game.GameRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -30,14 +31,17 @@ class ReadCacheTest {
 
     @MockitoBean private lateinit var gameRepository: GameRepository
 
-    // game_award 는 Flyway 가 만드는 테이블이고 테스트는 엔티티로만 스키마를 만든다.
+    // game_award, game_anticipation, game_view_daily 는 Flyway 가 만드는 테이블이고
+    // 테스트는 엔티티로만 스키마를 만든다.
     @MockitoBean private lateinit var awardBadgeLookup: AwardBadgeLookup
+    @MockitoBean private lateinit var audienceService: AudienceService
 
     @BeforeEach
     fun reset() {
         evictor.evictAll()
         `when`(gameRepository.findAllForDiscovery()).thenReturn(emptyList())
         `when`(awardBadgeLookup.badges()).thenReturn(emptyMap())
+        `when`(audienceService.counts()).thenReturn(emptyMap())
     }
 
     @Test

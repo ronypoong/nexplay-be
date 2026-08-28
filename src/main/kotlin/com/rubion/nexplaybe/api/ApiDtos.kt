@@ -42,6 +42,10 @@ data class GameResponse(
     val symbol: String,
     val featured: Boolean,
     val awardBadge: AwardBadge? = null,
+    /** 기대를 누른 사람 수. 아직 적으면 null 이라 화면에서 감춘다. */
+    val anticipations: Int? = null,
+    /** 누적 조회수. 아직 적으면 null 이다. */
+    val views: Int? = null,
 )
 
 data class GameEventResponse(
@@ -106,6 +110,10 @@ data class GameCardResponse(
     val symbol: String,
     val featured: Boolean,
     val awardBadge: AwardBadge? = null,
+    /** 기대를 누른 사람 수. 아직 적으면 null 이라 화면에서 감춘다. */
+    val anticipations: Int? = null,
+    /** 누적 조회수. 아직 적으면 null 이다. */
+    val views: Int? = null,
 )
 
 /** 홈이 배열 길이로 세던 값들. 목록을 자르면 그 수가 틀려지므로 서버가 진짜 총계를 준다. */
@@ -158,7 +166,10 @@ fun GameEvent.toResponse(
     )
 }
 
-fun Game.toCardResponse(awardBadge: AwardBadge? = null) = GameCardResponse(
+fun Game.toCardResponse(
+    awardBadge: AwardBadge? = null,
+    audience: com.rubion.nexplaybe.popularity.AudienceCounts? = null,
+) = GameCardResponse(
     id = id.toString(), slug = slug, title = title, tagline = tagline,
     developer = developer.name, publisher = publisher.name,
     genres = genres.sorted(), platforms = platforms.sortedBy(::platformOrder), gameModes = gameModes.sorted(),
@@ -169,6 +180,7 @@ fun Game.toCardResponse(awardBadge: AwardBadge? = null) = GameCardResponse(
     score = discoveryScore.toInt(), anticipationScore = anticipationScore.toInt(),
     followers = formatFollowers(followerCount), accent = accent, accent2 = accentSecondary,
     symbol = symbol, featured = featured, awardBadge = awardBadge,
+    anticipations = audience?.anticipations, views = audience?.views,
 )
 
 fun Release.toResponse() = ReleaseResponse(id.toString(), game.toCardResponse(), platform, releaseDate.toString(), status.name, region)

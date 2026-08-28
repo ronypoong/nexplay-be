@@ -5,6 +5,7 @@ import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.intelligence.PromiseQueryService
 import com.rubion.nexplaybe.korean.KoreanSupportService
 import com.rubion.nexplaybe.anticipation.AnticipationService
+import com.rubion.nexplaybe.popularity.AudienceService
 import com.rubion.nexplaybe.scheduling.SyncStatusService
 import com.rubion.nexplaybe.metadata.ExtendedGameMetadataService
 import com.rubion.nexplaybe.awards.GameAwardService
@@ -14,7 +15,9 @@ import org.springframework.format.annotation.DateTimeFormat
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -33,6 +36,7 @@ class DiscoveryController(
     private val promiseQueryService: PromiseQueryService,
     private val syncStatusService: SyncStatusService,
     private val anticipationService: AnticipationService,
+    private val audienceService: AudienceService,
 ) {
     /**
      * "기대돼요". 누르면 켜지고 다시 누르면 꺼진다.
@@ -50,6 +54,16 @@ class DiscoveryController(
     @GetMapping("/games/{slug}/anticipate")
     fun anticipationState(@PathVariable slug: String, request: HttpServletRequest) =
         anticipationService.state(slug, clientIpOf(request))
+
+    /**
+     * 한 번 봤다고 기록한다. 화면이 마운트될 때 한 번만 보낸다.
+     *
+     * 서버 렌더에서 세지 않는 이유는 프론트가 응답을 캐시하기 때문이다. 캐시를
+     * 타면 사람이 와도 서버는 모른다. 그리고 크롤러까지 세게 된다.
+     */
+    @PostMapping("/games/{slug}/view")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun recordView(@PathVariable slug: String) = audienceService.recordView(slug)
 
     /** 지금 가장 기대받는 게임. 표본이 얇으면 비어 있다. */
     @GetMapping("/anticipated")
