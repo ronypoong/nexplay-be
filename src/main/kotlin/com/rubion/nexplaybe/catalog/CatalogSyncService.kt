@@ -16,6 +16,7 @@ import com.rubion.nexplaybe.release.ReleaseRepository
 import com.rubion.nexplaybe.release.ReleaseStatus
 import com.rubion.nexplaybe.source.PolicyStatus
 import com.rubion.nexplaybe.source.SourceRepository
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.text.Normalizer
@@ -58,6 +59,7 @@ class CatalogSyncService(
     private val companyRepository: CompanyRepository,
     private val gameRepository: GameRepository,
     private val releaseRepository: ReleaseRepository,
+    private val jdbc: JdbcTemplate,
 ) {
     private val running = AtomicBoolean(false)
 
@@ -233,6 +235,33 @@ class CatalogSyncService(
         return ClassificationEnrichmentSummary("SUCCESS", candidates.size, enriched, candidates.size - enriched)
     }
 
+    /**
+     * 상태는 저장 컬럼이라 시간이 지나면 저절로 어긋난다.
+     * 2026-01-01 로 들어간 "2026년 출시 예정" 게임은 2027년이 되어도 예정으로 남는다.
+     * 매일 한 번 현재 날짜 기준으로 다시 맞춘다. V18 마이그레이션과 같은 규칙이다.
+     */
+    fun refreshReleaseStatuses(): Int {
+        val games = jdbc.update(
+            """
+            UPDATE game SET status='AVAILABLE',
+              release_label = IF(release_label = CONCAT(YEAR(release_date),'년 출시 예정'),
+                                 CONCAT(YEAR(release_date),'년 출시'), release_label)
+            WHERE status='UPCOMING' AND release_date IS NOT NULL
+              AND ((MONTH(release_date)=1 AND DAY(release_date)=1 AND YEAR(release_date) < YEAR(CURDATE()))
+                OR (NOT (MONTH(release_date)=1 AND DAY(release_date)=1) AND release_date < CURDATE()))
+            """.trimIndent(),
+        )
+        val releases = jdbc.update(
+            """
+            UPDATE game_release SET status='RELEASED'
+            WHERE status='EXPECTED'
+              AND ((MONTH(release_date)=1 AND DAY(release_date)=1 AND YEAR(release_date) < YEAR(CURDATE()))
+                OR (NOT (MONTH(release_date)=1 AND DAY(release_date)=1) AND release_date < CURDATE()))
+            """.trimIndent(),
+        )
+        return games + releases
+    }
+
     // 플랫폼 집합이 바뀌면 release 행도 같이 맞춘다.
     // 예전에는 "미정" 이었던 경우에만 다시 만들어서 game.platforms 와 release.platform 이 어긋났다.
     private fun syncReleases(game: Game, platformsBefore: Set<String>) {
@@ -281,8 +310,15 @@ class CatalogSyncService(
         val majorCompanyBoost = if (developer.major || publisher.major) 3 else 0
         val score = (recencyBase - (dayDistance / 10).coerceAtMost(15) + majorCompanyBoost).coerceIn(75, 99)
         val colors = colorsFor(item.wikidataId)
+        // Wikidata 가 연도만 알 때 1월 1일로 내려준다. 이걸 "예정" 으로 두면 지난 해 게임이 영원히 출시 예정으로 남는다.
         val yearOnly = item.releaseDate.monthValue == 1 && item.releaseDate.dayOfMonth == 1
-        val releaseLabel = if (yearOnly) "${item.releaseDate.year}년 출시 예정" else "%d. %02d. %02d".format(item.releaseDate.year, item.releaseDate.monthValue, item.releaseDate.dayOfMonth)
+        val yearPassed = yearOnly && item.releaseDate.year < today.year
+        val stillUpcoming = if (yearOnly) item.releaseDate.year >= today.year else item.releaseDate.isAfter(today)
+        val releaseLabel = when {
+            yearOnly && yearPassed -> "${item.releaseDate.year}년 출시"
+            yearOnly -> "${item.releaseDate.year}년 출시 예정"
+            else -> "%d. %02d. %02d".format(item.releaseDate.year, item.releaseDate.monthValue, item.releaseDate.dayOfMonth)
+        }
         val symbol = item.title.filter(Char::isLetterOrDigit).take(2).uppercase().ifBlank { "✦" }
         return Game(
             slug = slug,
@@ -300,7 +336,7 @@ class CatalogSyncService(
             coverImageUrl = item.imageUrl,
             imageSource = item.imageSource,
             releaseLabel = releaseLabel,
-            status = if (yearOnly || item.releaseDate.isAfter(today)) GameStatus.UPCOMING else GameStatus.AVAILABLE,
+            status = if (stillUpcoming) GameStatus.UPCOMING else GameStatus.AVAILABLE,
             discoveryScore = BigDecimal.valueOf(score.toLong()),
             anticipationScore = BigDecimal.valueOf((score + if (item.releaseDate.isAfter(today)) 1 else -3).coerceIn(70, 100).toLong()),
             followerCount = 0,
@@ -318,8 +354,13 @@ class CatalogSyncService(
         game = game,
         platform = platform,
         releaseDate = releaseDate,
-        status = if ((releaseDate.monthValue == 1 && releaseDate.dayOfMonth == 1) || releaseDate.isAfter(LocalDate.now())) ReleaseStatus.EXPECTED else ReleaseStatus.RELEASED,
+        status = if (isStillUpcoming(releaseDate)) ReleaseStatus.EXPECTED else ReleaseStatus.RELEASED,
     )
+
+    // 연도만 아는 날짜(1월 1일)는 그 해가 지나지 않았을 때만 "예정" 이다.
+    private fun isStillUpcoming(releaseDate: LocalDate, today: LocalDate = LocalDate.now()): Boolean =
+        if (releaseDate.monthValue == 1 && releaseDate.dayOfMonth == 1) releaseDate.year >= today.year
+        else releaseDate.isAfter(today)
 
     private fun slugify(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKD)
         .lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "game-${value.hashCode().absoluteValue}" }

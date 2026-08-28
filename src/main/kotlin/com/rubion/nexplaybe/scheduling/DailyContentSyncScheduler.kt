@@ -36,15 +36,17 @@ class DailyContentSyncScheduler(
         val year = LocalDate.now(ZoneId.of(zone)).year
         // 각 단계를 격리한다. 예전에는 중간 단계가 던지면 마지막의 뉴스 수집이 그날 통째로 실행되지 않았다.
         val catalogs = (year..year + 1).map { step("catalog-$it", CatalogSyncSummary("FAILED", it, 0, 0, 0)) { catalogSyncService.sync(it) } }
+        val refreshed = step("release-status-refresh", 0) { catalogSyncService.refreshReleaseStatuses() }
         val enrichment = step("wikidata-classifications", ClassificationEnrichmentSummary("FAILED", 0, 0, 0)) { catalogSyncService.enrichWikidataClassifications() }
         val extended = step("steam-extended", RichMetadataSyncSummary("FAILED", 0, 0, 0)) { richMetadataIngestionService.enrichFromSteam() }
         val snapshots = step("popularity-snapshot", 0) { richMetadataIngestionService.snapshotPopularity() }
         val relations = step("wikidata-relations", RichMetadataSyncSummary("FAILED", 0, 0, 0)) { richMetadataIngestionService.enrichWikidataRelations() }
         val news = step("steam-news", CollectorSummary("FAILED", 0, 0, 0, 0, emptyList())) { steamNewsCollector.collect() }
         log.info(
-            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, enrichedGames={}, extendedMetadata={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, errors={}",
+            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, errors={}",
             catalogs.joinToString { "${it.year}:${it.status}" },
             catalogs.sumOf { it.inserted },
+            refreshed,
             enrichment.enriched,
             extended.enriched,
             relations.enriched,
