@@ -116,9 +116,17 @@ class DiscoveryService(
             .toList()
     }
 
+    /**
+     * 목록과 검색.
+     *
+     * 검색어가 있으면 아카이브 전용 게임까지 본다. ELDEN RING 같은 역대 수상작은
+     * 카탈로그에서 빼 두는데(GOTY 화면에만 쓰려고), 그 탓에 "elden" 으로 검색하면
+     * 아무것도 안 나왔다. 목록에서 빼는 것과 찾을 수 없게 하는 것은 다른 일이다.
+     */
     fun games(platform: String?, genre: String?, query: String?): List<GameCardResponse> {
         val needle = query?.takeIf(String::isNotBlank)?.lowercase()
-        return catalogSnapshot.entries().asSequence()
+        val pool = if (needle == null) catalogSnapshot.entries() else catalogSnapshot.searchableEntries()
+        return pool.asSequence()
             .filter { platform.isNullOrBlank() || it.platforms.any { value -> value.equals(platform, true) } }
             .filter { genre.isNullOrBlank() || it.genres.any { value -> value.equals(genre, true) } }
             .filter { needle == null || it.searchText.contains(needle) }

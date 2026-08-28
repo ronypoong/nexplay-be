@@ -56,11 +56,23 @@ class CatalogSnapshot(
 ) {
     @Cacheable(CacheConfig.CATALOG)
     @Transactional(readOnly = true)
-    fun entries(): List<CatalogEntry> {
+    fun entries(): List<CatalogEntry> = build(gameRepository.findAllForDiscovery())
+
+    /**
+     * 검색에 쓰는 목록. 아카이브 전용 게임까지 담는다.
+     *
+     * 역대 수상작은 카탈로그 목록에서 빼 두지만, 찾을 수 없게 하려던 것은 아니다.
+     * "elden" 으로 검색해서 아무것도 안 나오면 그건 고장이다.
+     */
+    @Cacheable(CacheConfig.CATALOG, key = "'searchable'")
+    @Transactional(readOnly = true)
+    fun searchableEntries(): List<CatalogEntry> = build(gameRepository.findAllForSearch())
+
+    private fun build(games: List<com.rubion.nexplaybe.game.Game>): List<CatalogEntry> {
         val badges = awardBadgeLookup.badges()
         // 목록마다 게임 하나씩 세면 N+1 이다. 한 번에 받아 맵으로 쓴다.
         val audience = audienceService.counts()
-        return gameRepository.findAllForDiscovery().map { game ->
+        return games.map { game ->
             CatalogEntry(
                 card = game.toCardResponse(badges[game.id], audience[game.id]),
                 id = game.id,
