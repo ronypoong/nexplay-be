@@ -31,7 +31,6 @@ dependencies {
     implementation 'org.jetbrains.kotlin:kotlin-reflect'
     implementation 'com.fasterxml.jackson.module:jackson-module-kotlin'
     // 이벤트 분류·구조화 추출용. 키가 없으면 기능 자체가 꺼진다.
-    implementation 'com.anthropic:anthropic-java:2.34.0'
     implementation 'org.flywaydb:flyway-mysql'
     runtimeOnly 'com.mysql:mysql-connector-j'
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

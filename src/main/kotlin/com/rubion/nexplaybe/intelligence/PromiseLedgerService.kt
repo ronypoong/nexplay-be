@@ -1,8 +1,5 @@
 package com.rubion.nexplaybe.intelligence
 
-import com.anthropic.client.AnthropicClient
-import com.anthropic.client.okhttp.AnthropicOkHttpClient
-import com.anthropic.models.messages.MessageCreateParams
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.jdbc.core.JdbcTemplate
@@ -25,16 +22,13 @@ data class ResolutionSummary(val evaluated: Int, val kept: Int, val broken: Int,
 class PromiseLedgerService(
     private val jdbc: JdbcTemplate,
     private val transactions: TransactionTemplate,
-    @param:Value("\${nexplay.intelligence.api-key:}") private val apiKey: String,
-    @param:Value("\${nexplay.intelligence.model:claude-opus-5}") private val model: String,
+    private val extractor: OpenAiExtractor,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val client: AnthropicClient? by lazy {
-        apiKey.takeIf(String::isNotBlank)?.let { AnthropicOkHttpClient.builder().apiKey(it).build() }
-    }
+    private val model: String get() = extractor.model
 
     fun extractPromises(limit: Int = DEFAULT_LIMIT): PromiseSyncSummary {
-        val anthropic = client ?: run {
+        if (!extractor.enabled) {
             log.warn("약속 추출을 건너뜁니다. NEXPLAY_INTELLIGENCE_API_KEY 가 설정되지 않았습니다.")
             return PromiseSyncSummary("SKIPPED_NO_API_KEY", 0, 0, 0)
         }
@@ -43,7 +37,7 @@ class PromiseLedgerService(
             SELECT e.id, e.game_id, e.title, r.raw_payload, e.summary, e.event_date, g.title AS game_title
             FROM game_event e
             JOIN game g ON g.id = e.game_id
-            LEFT JOIN game_event_source s ON s.event_id = e.id
+            LEFT JOIN game_event_source s ON s.game_event_id = e.id
             LEFT JOIN raw_item r ON r.id = s.raw_item_id
             WHERE NOT EXISTS (
                 SELECT 1 FROM game_promise p WHERE p.event_id = e.id AND p.prompt_version = ?
@@ -66,7 +60,7 @@ class PromiseLedgerService(
         var consecutiveFailures = 0
         for (candidate in candidates) {
             if (consecutiveFailures >= FAILURE_CUTOFF) break
-            val extraction = runCatching { extract(anthropic, candidate) }
+            val extraction = runCatching { extract(candidate) }
                 .onFailure { log.warn("이벤트 {} 약속 추출 실패: {}", candidate.eventId, it.message) }
                 .getOrNull()
             if (extraction == null) {
@@ -81,26 +75,22 @@ class PromiseLedgerService(
         return PromiseSyncSummary("SUCCESS", candidates.size, found, 0)
     }
 
-    private fun extract(anthropic: AnthropicClient, candidate: Candidate): PromiseExtraction {
+    private fun extract(candidate: Candidate): PromiseExtraction? {
         val body = (candidate.rawPayload ?: candidate.summary).orEmpty().take(4_000)
-        val params = MessageCreateParams.builder()
-            .model(model)
-            .maxTokens(2_000L)
-            .outputConfig(PromiseExtraction::class.java)
-            .system(SYSTEM_PROMPT)
-            .addUserMessage(
-                """
+        return extractor.extract(
+            schemaName = "promise_extraction",
+            schema = PROMISE_SCHEMA,
+            systemPrompt = SYSTEM_PROMPT,
+            userMessage = """
                 게임: ${candidate.gameTitle}
                 발표일: ${candidate.eventDate}
                 제목: ${candidate.title}
                 본문:
                 ${body.ifBlank { "(본문 없음 — 제목만으로 판단하고, 확실하지 않으면 약속을 반환하지 마세요)" }}
-                """.trimIndent(),
-            )
-            .build()
-        return anthropic.messages().create(params).content()
-            .firstNotNullOfOrNull { block -> block.text().orElse(null)?.text() }
-            ?: throw IllegalStateException("구조화 응답이 비어 있습니다")
+            """.trimIndent(),
+            maxOutputTokens = 1_500,
+            type = PromiseExtraction::class.java,
+        )
     }
 
     private fun store(candidate: Candidate, extraction: PromiseExtraction) {
@@ -141,6 +131,23 @@ class PromiseLedgerService(
         const val FAILURE_CUTOFF = 5
         const val PROMPT_VERSION = 1
         val CLAIM_TYPES = setOf("RELEASE_DATE", "KOREAN_SUPPORT", "CONTENT", "PLATFORM", "DEMO")
+
+        val PROMISE_SCHEMA = Schemas.obj(
+            "promises" to Schemas.arrayOf(
+                "이 발표가 담고 있는 약속들. 미래 시점의 약속이 없으면 빈 배열",
+                Schemas.obj(
+                    "claimType" to Schemas.enumOf(
+                        "약속의 종류",
+                        "RELEASE_DATE", "KOREAN_SUPPORT", "CONTENT", "PLATFORM", "DEMO",
+                    ),
+                    "claimedValue" to Schemas.str("약속한 내용을 원문 그대로. 예: 'Fall 2026', '한국어 자막 지원'"),
+                    "claimedFrom" to Schemas.nullableStr("약속 시점의 시작(YYYY-MM-DD). 'Fall 2026'이면 2026-09-01. 시점이 없으면 null"),
+                    "claimedTo" to Schemas.nullableStr("약속 시점의 끝(YYYY-MM-DD). 'Fall 2026'이면 2026-11-30. 시점이 없으면 null"),
+                    "claimPrecision" to Schemas.enumOf("시점의 정밀도", "DAY", "MONTH", "QUARTER", "SEASON", "YEAR", "NONE"),
+                    "sourceQuote" to Schemas.str("이 약속의 근거가 된 원문 문장을 그대로 인용. 최대 300자"),
+                ),
+            ),
+        )
         val SYSTEM_PROMPT = """
             당신은 게임 공식 발표에서 "앞으로 하겠다는 약속" 만 뽑아냅니다.
 

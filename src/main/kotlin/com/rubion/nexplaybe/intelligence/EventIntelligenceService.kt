@@ -1,8 +1,5 @@
 package com.rubion.nexplaybe.intelligence
 
-import com.anthropic.client.AnthropicClient
-import com.anthropic.client.okhttp.AnthropicOkHttpClient
-import com.anthropic.models.messages.MessageCreateParams
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.jdbc.core.JdbcTemplate
@@ -29,16 +26,13 @@ data class ExtractionSummary(val status: String, val candidates: Int, val extrac
 class EventIntelligenceService(
     private val jdbc: JdbcTemplate,
     private val transactions: TransactionTemplate,
-    @param:Value("\${nexplay.intelligence.api-key:}") private val apiKey: String,
-    @param:Value("\${nexplay.intelligence.model:claude-opus-5}") private val model: String,
+    private val extractor: OpenAiExtractor,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val client: AnthropicClient? by lazy {
-        apiKey.takeIf(String::isNotBlank)?.let { AnthropicOkHttpClient.builder().apiKey(it).build() }
-    }
+    private val model: String get() = extractor.model
 
     fun extract(limit: Int = DEFAULT_LIMIT): ExtractionSummary {
-        val anthropic = client ?: run {
+        if (!extractor.enabled) {
             log.warn("이벤트 분류를 건너뜁니다. NEXPLAY_INTELLIGENCE_API_KEY 가 설정되지 않았습니다.")
             return ExtractionSummary("SKIPPED_NO_API_KEY", 0, 0, 0)
         }
@@ -47,7 +41,7 @@ class EventIntelligenceService(
             SELECT e.id, e.title, COALESCE(r.raw_payload, e.summary) AS body, g.title AS game_title
             FROM game_event e
             JOIN game g ON g.id = e.game_id
-            LEFT JOIN game_event_source s ON s.event_id = e.id
+            LEFT JOIN game_event_source s ON s.game_event_id = e.id
             LEFT JOIN raw_item r ON r.id = s.raw_item_id
             WHERE NOT EXISTS (
                 SELECT 1 FROM game_event_extraction x
@@ -66,7 +60,7 @@ class EventIntelligenceService(
         var consecutiveFailures = 0
         for (candidate in candidates) {
             if (consecutiveFailures >= FAILURE_CUTOFF) break
-            val result = runCatching { classify(anthropic, candidate) }
+            val result = runCatching { classify(candidate) }
                 .onFailure { log.warn("이벤트 {} 분류 실패: {}", candidate.id, it.message) }
                 .getOrNull()
             if (result == null) {
@@ -80,25 +74,19 @@ class EventIntelligenceService(
         return ExtractionSummary("SUCCESS", candidates.size, extracted, candidates.size - extracted)
     }
 
-    private fun classify(anthropic: AnthropicClient, candidate: Candidate): EventExtraction {
-        val params = MessageCreateParams.builder()
-            .model(model)
-            .maxTokens(2_000L)
-            .outputConfig(EventExtraction::class.java)
-            .system(SYSTEM_PROMPT)
-            .addUserMessage(
-                """
-                게임: ${candidate.gameTitle}
-                제목: ${candidate.title}
-                본문:
-                ${candidate.body.orEmpty().take(4_000)}
-                """.trimIndent(),
-            )
-            .build()
-        return anthropic.messages().create(params).content()
-            .firstNotNullOfOrNull { block -> block.text().orElse(null)?.text() }
-            ?: throw IllegalStateException("구조화 응답이 비어 있습니다")
-    }
+    private fun classify(candidate: Candidate): EventExtraction? = extractor.extract(
+        schemaName = "event_extraction",
+        schema = EVENT_SCHEMA,
+        systemPrompt = SYSTEM_PROMPT,
+        userMessage = """
+            게임: ${candidate.gameTitle}
+            제목: ${candidate.title}
+            본문:
+            ${candidate.body.orEmpty().take(4_000)}
+        """.trimIndent(),
+        maxOutputTokens = 800,
+        type = EventExtraction::class.java,
+    )
 
     private fun store(eventId: Long, result: EventExtraction) {
         jdbc.update(
@@ -127,6 +115,25 @@ class EventIntelligenceService(
         const val FAILURE_CUTOFF = 5
         // 프롬프트를 바꾸면 올린다. 판본이 다르면 같은 이벤트를 다시 분류해 비교할 수 있다.
         const val PROMPT_VERSION = 1
+
+        /**
+         * strict 모드 스키마. 속성이 전부 required 여야 하므로, 값이 없을 수 있는 자리는
+         * required 에서 빼는 대신 null 을 허용하는 식으로 표현한다.
+         */
+        val EVENT_SCHEMA = Schemas.obj(
+            "eventType" to Schemas.enumOf(
+                "이벤트 유형. ANNOUNCEMENT 는 다른 어느 것에도 해당하지 않을 때만 쓴다.",
+                "RELEASE_DATE", "DELAY", "RELEASE", "PATCH", "MAJOR_UPDATE", "DLC", "EXPANSION",
+                "TRAILER", "GAMEPLAY", "DEMO", "BETA", "DISCOUNT", "PREORDER", "ANNOUNCEMENT",
+            ),
+            "confidence" to Schemas.enumOf("판단 확신도", "HIGH", "MEDIUM", "LOW"),
+            "summaryKo" to Schemas.nullableStr("한국어 한 줄 요약. 원문에 있는 사실만 쓴다. 최대 120자"),
+            "discountPercent" to Schemas.nullableInt("할인율(%). 원문에 명시된 숫자만. 없으면 null"),
+            "mentionedReleaseDate" to Schemas.nullableStr("원문이 언급한 출시일(YYYY-MM-DD). 명시되지 않았으면 null"),
+            "hasDemo" to Schemas.bool("체험판/데모 배포를 알리는 글이면 true"),
+            "isMarketingNoise" to Schemas.bool("게임 내용과 무관한 마케팅·커뮤니티 잡음이면 true"),
+            "reason" to Schemas.nullableStr("그렇게 분류한 근거를 원문 표현을 인용해 한 문장으로. 최대 200자"),
+        )
         val SYSTEM_PROMPT = """
             당신은 게임 뉴스를 분류하고 사실을 뽑아내는 일을 합니다.
 
