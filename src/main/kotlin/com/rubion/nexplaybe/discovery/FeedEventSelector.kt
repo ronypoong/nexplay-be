@@ -29,7 +29,7 @@ data class FeedEventStats(
 @Component
 class FeedEventSelector(private val jdbc: JdbcTemplate) {
 
-    fun topEventIds(limit: Int): List<Long> = jdbc.queryForList(
+    fun topEventIds(limit: Int, offset: Int = 0): List<Long> = jdbc.queryForList(
         """
         SELECT e.id
         FROM game_event e
@@ -63,10 +63,10 @@ class FeedEventSelector(private val jdbc: JdbcTemplate) {
             -- 종류와 중요도가 날짜보다 낫다.
             - LEAST(GREATEST(DATEDIFF(CURRENT_DATE, e.event_date), 0), 60) / 2
         ) DESC, e.published_at DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
         """.trimIndent(),
         Long::class.java,
-        limit,
+        limit, offset,
     ).filterNotNull()
 
     /** 통계는 보여 주는 목록이 아니라 아카이브 전체를 센다. 자른 목록으로 세면 총계가 틀린다. */

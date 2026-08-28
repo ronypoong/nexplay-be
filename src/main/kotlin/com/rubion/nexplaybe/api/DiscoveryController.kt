@@ -88,6 +88,10 @@ class DiscoveryController(
     @GetMapping("/status")
     fun status() = syncStatusService.status()
 
+    /** 모아 둔 공식 소식. 중요도 순으로 내려간다. */
+    @GetMapping("/events")
+    fun events(@RequestParam(defaultValue = "0") page: Int) = discoveryService.eventFeed(page)
+
     /** 약속과 결과의 대조표: 퍼블리셔별 신뢰도와 실제로 밀린 기록. */
     @GetMapping("/promises")
     fun promises() = promiseQueryService.ledger()

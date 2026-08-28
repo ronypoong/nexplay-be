@@ -80,6 +80,20 @@ class DiscoveryService(
         )
     }
 
+    /**
+     * 소식 목록.
+     *
+     * 홈은 30건만 보여 주는데 "전체 소식 보기" 가 게임 목록으로 가고 있었다.
+     * 소식을 모으는 서비스에 소식 목록이 없었던 셈이다.
+     */
+    @Cacheable(CacheConfig.SECTIONS, key = "'events-' + #page")
+    fun eventFeed(page: Int = 0): List<GameEventResponse> {
+        val insights = eventInsightLookup.insights()
+        val ranked = feedEventSelector.topEventIds(NEWS_PAGE_SIZE, page.coerceAtLeast(0) * NEWS_PAGE_SIZE)
+        val byId = eventRepository.findFeedEventsByIds(ranked).associateBy { it.id }
+        return ranked.mapNotNull(byId::get).map { it.toResponse(clock, insights[it.id]) }
+    }
+
     /** 같은 장르를 공유하는 게임. 상세 화면이 전체 카탈로그를 받아 3개만 쓰던 것을 대신한다. */
     fun related(slug: String, limit: Int = 3): List<GameCardResponse> {
         val games = catalogSnapshot.entries()
@@ -140,6 +154,7 @@ class DiscoveryService(
         const val FEED_EVENT_LIMIT = 30
         const val UPCOMING_LIMIT = 10
         const val HIDDEN_GEM_COUNT = 2
+        const val NEWS_PAGE_SIZE = 40
     }
 }
 
