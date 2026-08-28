@@ -105,11 +105,23 @@ class TrendService(private val jdbc: JdbcTemplate) {
             JOIN game_promise_resolution r ON r.promise_id = p.id
             JOIN game g ON g.id = p.game_id
             WHERE p.claim_type = 'RELEASE_DATE' AND p.provenance = 'LIVE'
-              AND r.status = 'SUPERSEDED' AND r.slip_days > 0
-              AND r.actual_value IS NOT NULL
-            ORDER BY p.announced_at DESC, r.slip_days DESC
+              AND r.status = 'SUPERSEDED' AND r.actual_value IS NOT NULL
+              -- 하루 이틀 차이는 연기가 아니라 표현 차이다. "August 20" 과
+              -- "in just two days" 를 견주면 +1일이 나오는데, 그건 같은 말이다.
+              AND r.slip_days >= ?
+              -- 같은 게임의 같은 연기가 발표마다 한 줄씩 쌓인다. 게임당 가장 크게
+              -- 밀린 것 하나만 싣는다 — 목록이 한 게임으로 도배되면 못 읽는다.
+              AND r.slip_days = (
+                  SELECT MAX(r2.slip_days) FROM game_promise p2
+                  JOIN game_promise_resolution r2 ON r2.promise_id = p2.id
+                  WHERE p2.game_id = p.game_id AND p2.claim_type = 'RELEASE_DATE'
+                    AND p2.provenance = 'LIVE' AND r2.status = 'SUPERSEDED'
+              )
+            GROUP BY g.slug, g.title, p.claimed_value, r.actual_value, r.slip_days, p.announced_at
+            ORDER BY r.slip_days DESC, p.announced_at DESC
             LIMIT 20
             """.trimIndent(),
+            MIN_SHIFT_DAYS,
         ) { rs, _ ->
             DelayEntry(
                 rs.getString("slug"), rs.getString("title"),
@@ -133,6 +145,9 @@ class TrendService(private val jdbc: JdbcTemplate) {
             JOIN game g ON g.id = p.game_id
             JOIN company c ON c.id = g.publisher_id
             WHERE p.claim_type = 'RELEASE_DATE' AND p.provenance = 'LIVE'
+              -- 퍼블리셔를 못 찾은 게임의 자리표시자다. 이름이 아니라 빈칸이라
+              -- 신뢰도를 매길 대상이 아니다.
+              AND c.slug <> 'independent-unknown'
             GROUP BY c.name
             -- 약속 한두 건으로 스튜디오를 평가하면 그 표가 거짓말이 된다.
             HAVING COUNT(*) >= 3 AND delays > 0
@@ -158,5 +173,7 @@ class TrendService(private val jdbc: JdbcTemplate) {
         // 이틀치로 "급상승" 을 말하면 노이즈다. 일주일은 있어야 추세라 부를 수 있다.
         const val MIN_SNAPSHOT_DAYS = 7
         const val MIN_CHANGES = 1
+        /** 하루 이틀 차이는 연기가 아니라 같은 날짜를 다르게 말한 것이다. */
+        const val MIN_SHIFT_DAYS = 7
     }
 }
