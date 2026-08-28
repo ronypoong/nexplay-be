@@ -83,6 +83,7 @@ class RichMetadataIngestionService(
         game.koreanAudioSupported = if (data.languages.isEmpty()) null else korean?.audio ?: false
         gameRepository.save(game)
 
+        recordLanguageChanges(game.id, data, sourceUrl)
         data.languages.forEach { language ->
             jdbc.update(
                 """INSERT INTO game_language_support (game_id,language_code,language_name,text_supported,audio_supported,source_name,source_url,verified_at)
@@ -139,6 +140,41 @@ class RichMetadataIngestionService(
                 """INSERT INTO game_data_provenance (game_id,field_name,source_name,source_url,confidence,verified_at)
                 VALUES (?,?,'Steam Store',?,'HIGH',?) ON DUPLICATE KEY UPDATE verified_at=VALUES(verified_at)""",
                 game.id, field, sourceUrl, now,
+            )
+        }
+    }
+
+    /**
+     * 언어 지원이 바뀌면 이력으로 남긴다.
+     *
+     * game_language_support 는 덮어쓰기라 과거가 사라진다. "이 게임이 언제부터
+     * 한국어를 지원했나" 는 지금 남기지 않으면 나중에 만들 수 없는 정보다.
+     * 바뀐 것만 남긴다 — 매일 같은 값을 다시 적으면 이력이 아니라 로그가 된다.
+     */
+    private fun recordLanguageChanges(gameId: Long, data: SteamStoreMetadata, sourceUrl: String) {
+        val before = jdbc.query(
+            "SELECT language_code, text_supported, audio_supported FROM game_language_support WHERE game_id = ?",
+            { rs, _ -> rs.getString(1) to (rs.getBoolean(2) to rs.getBoolean(3)) },
+            gameId,
+        ).toMap()
+        val after = data.languages.associate { it.code to (it.text to it.audio) }
+
+        (before.keys + after.keys).forEach { code ->
+            val old = before[code]
+            val new = after[code]
+            if (old == new) return@forEach
+            val changeType = when {
+                old == null -> "ADDED"
+                new == null -> "REMOVED"
+                else -> "CHANGED"
+            }
+            jdbc.update(
+                """
+                INSERT INTO game_language_history
+                  (game_id, language_code, change_type, previous_text, previous_audio, new_text, new_audio, source_name, source_url)
+                VALUES (?,?,?,?,?,?,?, 'Steam Store', ?)
+                """.trimIndent(),
+                gameId, code, changeType, old?.first, old?.second, new?.first, new?.second, sourceUrl,
             )
         }
     }

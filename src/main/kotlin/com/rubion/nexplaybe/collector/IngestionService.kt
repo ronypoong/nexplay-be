@@ -19,6 +19,10 @@ data class IngestionResult(val newItems: Int, val newEvents: Int)
 
 @Service
 class IngestionService(
+    // 30일이었다. 아카이브를 만들겠다면서 30일 만료를 걸어둔 셈이었다.
+    // 지금은 아무것도 이 값으로 지우지 않지만, 의도를 값으로 남겨 둔다.
+    @param:org.springframework.beans.factory.annotation.Value("\${nexplay.archive.raw-retention-days:3650}")
+    private val retentionDays: Long,
     private val rawItemRepository: RawItemRepository,
     private val eventRepository: GameEventRepository,
     private val eventSourceRepository: GameEventSourceRepository,
@@ -35,9 +39,12 @@ class IngestionService(
             val rawItem = rawItemRepository.save(
                 RawItem(
                     source = subscription.source, game = subscription.game, externalId = externalId,
-                    sourceUrl = item.url, title = item.title, publishedAt = item.publishedAt, rawPayload = null,
+                    sourceUrl = item.url, title = item.title, publishedAt = item.publishedAt,
+                    // 원문을 버리면 나중에 다시 분류할 수 없다. Steam RSS 는 과거 글을
+                    // 다시 주지 않으므로 오늘 안 받아두면 그 하루는 영영 없다.
+                    rawPayload = item.body.takeIf(String::isNotBlank),
                     contentHash = sha256("${item.title}|${item.url}"), fetchedAt = now,
-                    expiresAt = now.plus(Duration.ofDays(30)),
+                    expiresAt = now.plus(Duration.ofDays(retentionDays)),
                 )
             )
             newItems++

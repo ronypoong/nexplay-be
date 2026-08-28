@@ -38,6 +38,9 @@ management:
       show-details: always
 
 nexplay:
+  archive:
+    # 수집 원문 보관 기간. 시간이 지날수록 값이 오르는 자산이라 길게 잡는다.
+    raw-retention-days: ${NEXPLAY_RAW_RETENTION_DAYS:3650}
   admin:
     # 비어 있으면 관리 API 는 503 으로 막힌다. 설정을 잊었을 때 열리는 것보다 닫히는 편이 안전하다.
     token: ${NEXPLAY_ADMIN_TOKEN:}
