@@ -58,11 +58,22 @@ class EventIntelligenceService(
 
         var extracted = 0
         var consecutiveFailures = 0
+        var status = "SUCCESS"
         for (candidate in candidates) {
-            if (consecutiveFailures >= FAILURE_CUTOFF) break
-            val result = runCatching { classify(candidate) }
-                .onFailure { log.warn("이벤트 {} 분류 실패: {}", candidate.id, it.message) }
-                .getOrNull()
+            if (consecutiveFailures >= FAILURE_CUTOFF) {
+                status = "STOPPED_TOO_MANY_FAILURES"
+                break
+            }
+            val result = try {
+                classify(candidate)
+            } catch (e: BudgetExhaustedException) {
+                log.warn("{} — 남은 글은 다음 실행에서 이어서 본다.", e.message)
+                status = "STOPPED_TOKEN_BUDGET"
+                break
+            } catch (e: Exception) {
+                log.warn("이벤트 {} 분류 실패: {}", candidate.id, e.message)
+                null
+            }
             if (result == null) {
                 consecutiveFailures++
                 continue
@@ -71,7 +82,7 @@ class EventIntelligenceService(
             transactions.execute { store(candidate.id, result) }
             extracted++
         }
-        return ExtractionSummary("SUCCESS", candidates.size, extracted, candidates.size - extracted)
+        return ExtractionSummary(status, candidates.size, extracted, candidates.size - extracted)
     }
 
     private fun classify(candidate: Candidate): EventExtraction? = extractor.extract(

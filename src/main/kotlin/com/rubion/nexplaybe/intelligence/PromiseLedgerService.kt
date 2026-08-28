@@ -57,24 +57,41 @@ class PromiseLedgerService(
         if (candidates.isEmpty()) return PromiseSyncSummary("SUCCESS", 0, 0, 0)
 
         var found = 0
+        var scanned = 0
+        var failed = 0
         var consecutiveFailures = 0
+        var status = "SUCCESS"
         for (candidate in candidates) {
-            if (consecutiveFailures >= FAILURE_CUTOFF) break
-            val extraction = runCatching { extract(candidate) }
-                .onFailure { log.warn("이벤트 {} 약속 추출 실패: {}", candidate.eventId, it.message) }
-                .getOrNull()
+            if (consecutiveFailures >= FAILURE_CUTOFF) {
+                status = "STOPPED_TOO_MANY_FAILURES"
+                break
+            }
+            val extraction = try {
+                extract(candidate)
+            } catch (e: BudgetExhaustedException) {
+                log.warn("{} — 남은 글은 다음 실행에서 이어서 본다.", e.message)
+                status = "STOPPED_TOKEN_BUDGET"
+                break
+            } catch (e: Exception) {
+                log.warn("이벤트 {} 약속 추출 실패: {}", candidate.eventId, e.message)
+                null
+            }
             if (extraction == null) {
                 consecutiveFailures++
+                failed++
                 continue
             }
             consecutiveFailures = 0
+            scanned++
             // 약속이 없는 글이 대부분이다. 빈 결과도 결과이므로 반드시 남긴다.
             // 안 남기면 다음 실행에서 같은 글을 또 모델에게 보내고, LIMIT 에 걸려
             // 오래된 글에는 영영 닿지 못한다.
             transactions.execute { store(candidate, extraction) }
             found += extraction.promises.size
         }
-        return PromiseSyncSummary("SUCCESS", candidates.size, found, 0)
+        // scanned 는 후보 수가 아니라 실제로 본 수여야 한다. 중간에 멈췄는데 후보 수를
+        // 그대로 돌려주면 "20건을 봤지만 아무것도 없었다" 로 읽힌다.
+        return PromiseSyncSummary(status, scanned, found, failed)
     }
 
     private fun extract(candidate: Candidate): PromiseExtraction? {

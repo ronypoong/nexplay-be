@@ -24,6 +24,10 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * 키가 없으면 전체가 꺼진다. 조용히 엉뚱한 값을 쓰느니 아무것도 안 하는 편이 낫다.
  */
+/** 하루 토큰 상한에 걸렸다. 실패가 아니라 "오늘은 여기까지" 라는 뜻이다. */
+class BudgetExhaustedException(budget: Long, spent: Long) :
+    RuntimeException("일일 토큰 예산 소진: $spent / $budget")
+
 @Component
 class OpenAiExtractor(
     @param:Value("\${nexplay.intelligence.api-key:}") private val apiKey: String,
@@ -72,10 +76,9 @@ class OpenAiExtractor(
         type: Class<T>,
     ): T? {
         if (!enabled) return null
-        if (!hasRoom()) {
-            log.warn("일일 토큰 예산({})을 넘어 모델 호출을 건너뜁니다.", dailyTokenBudget)
-            return null
-        }
+        // 예산 소진을 null 로 돌려주면 부르는 쪽에서 "약속이 없었다" 와 구분할 수 없다.
+        // 실제로 배치 아홉 번이 아무 일도 안 하고 SUCCESS 를 보고한 적이 있다.
+        if (!hasRoom()) throw BudgetExhaustedException(dailyTokenBudget, spentToday.get())
 
         val body = mapOf(
             "model" to model,
@@ -113,6 +116,8 @@ class OpenAiExtractor(
 
     /** 오늘 쓴 토큰. 관리 화면에서 확인용. */
     fun tokensSpentToday(): Long = spentToday.get()
+
+    val dailyBudget: Long get() = dailyTokenBudget
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class ChatResponse(val choices: List<Choice> = emptyList(), val usage: Usage? = null)
