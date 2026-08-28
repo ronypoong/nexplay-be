@@ -121,18 +121,19 @@ class TrendService(private val jdbc: JdbcTemplate) {
             ORDER BY r.slip_days DESC, p.announced_at DESC
             LIMIT 20
             """.trimIndent(),
+            RowMapper { rs, _ ->
+                DelayEntry(
+                    rs.getString("slug"), rs.getString("title"),
+                    // 근거가 무엇인지 화면에 그대로 적는다. 추정한 날짜가 아니라
+                    // 게임사가 공식 발표에서 한 말이다.
+                    "공식 발표",
+                    rs.getString("prev_label"), rs.getString("next_label"),
+                    "DELAY", rs.getInt("slip_days"),
+                    rs.getDate("announced_at").toLocalDate().toString(),
+                )
+            },
             MIN_SHIFT_DAYS,
-        ) { rs, _ ->
-            DelayEntry(
-                rs.getString("slug"), rs.getString("title"),
-                // 근거가 무엇인지 화면에 그대로 적는다. 추정한 날짜가 아니라
-                // 게임사가 공식 발표에서 한 말이다.
-                "공식 발표",
-                rs.getString("prev_label"), rs.getString("next_label"),
-                "DELAY", rs.getInt("slip_days"),
-                rs.getDate("announced_at").toLocalDate().toString(),
-            )
-        }
+        )
 
         val studios = jdbc.query(
             """
