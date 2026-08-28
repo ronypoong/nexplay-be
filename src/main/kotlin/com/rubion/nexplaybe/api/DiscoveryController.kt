@@ -2,6 +2,7 @@ package com.rubion.nexplaybe.api
 
 import com.rubion.nexplaybe.discovery.DiscoveryService
 import com.rubion.nexplaybe.editorial.EditorPickService
+import com.rubion.nexplaybe.intelligence.EventDetailService
 import com.rubion.nexplaybe.intelligence.PromiseQueryService
 import com.rubion.nexplaybe.korean.KoreanSupportService
 import com.rubion.nexplaybe.anticipation.AnticipationService
@@ -37,6 +38,7 @@ class DiscoveryController(
     private val syncStatusService: SyncStatusService,
     private val anticipationService: AnticipationService,
     private val audienceService: AudienceService,
+    private val eventDetailService: EventDetailService,
 ) {
     /**
      * "기대돼요". 누르면 켜지고 다시 누르면 꺼진다.
@@ -91,6 +93,12 @@ class DiscoveryController(
     /** 모아 둔 공식 소식. 중요도 순으로 내려간다. */
     @GetMapping("/events")
     fun events(@RequestParam(defaultValue = "0") page: Int) = discoveryService.eventFeed(page)
+
+    /**
+     * 소식 하나를 자세히. 원문은 옮기지 않고 우리가 뽑은 사실만 보여 준다.
+     */
+    @GetMapping("/events/{id}")
+    fun eventDetail(@PathVariable id: Long) = eventDetailService.detail(id)
 
     /** 약속과 결과의 대조표: 퍼블리셔별 신뢰도와 실제로 밀린 기록. */
     @GetMapping("/promises")
