@@ -38,7 +38,7 @@ data class LlmUsageToday(val calls: Long, val totalTokens: Long, val budget: Lon
 @Service
 class SyncStatusService(
     private val jdbc: JdbcTemplate,
-    @param:org.springframework.beans.factory.annotation.Value("\${nexplay.intelligence.daily-token-budget:200000}")
+    @param:org.springframework.beans.factory.annotation.Value("\${nexplay.intelligence.daily-token-budget:60000}")
     private val llmBudget: Long,
 ) {
 
