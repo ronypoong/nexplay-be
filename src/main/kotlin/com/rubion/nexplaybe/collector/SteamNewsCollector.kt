@@ -26,6 +26,10 @@ class SteamNewsCollector(
 ) {
     private val running = AtomicBoolean(false)
 
+    private companion object {
+        const val PACE_MS = 250L
+    }
+
     fun collect(): CollectorSummary {
         if (!running.compareAndSet(false, true)) return CollectorSummary("SKIPPED_ALREADY_RUNNING", 0, 0, 0, 0, emptyList())
         var run: CollectorRun? = null
@@ -42,7 +46,10 @@ class SteamNewsCollector(
             var newItems = 0
             var newEvents = 0
             val errors = mutableListOf<String>()
-            subscriptions.forEach { subscription ->
+            subscriptions.forEachIndexed { index, subscription ->
+                // 구독이 수백 개가 되면 몰아치지 않는다. 되찾을 수 없는 데이터를 받는
+                // 일이라 급할 이유가 없고, 막히면 그날치를 통째로 잃는다.
+                if (index > 0) runCatching { Thread.sleep(PACE_MS) }
                 runCatching {
                     val items = client.fetch(subscription.feedUrl)
                     fetched += items.size

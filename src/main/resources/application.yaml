@@ -93,6 +93,8 @@ nexplay:
     cron: ${NEXPLAY_DAILY_SYNC_CRON:0 0 6 * * *}
     zone: ${NEXPLAY_DAILY_SYNC_ZONE:Asia/Seoul}
   catalog:
+    # 한 번 돌 때 새로 구독할 게임 수. 스팀 ID 가 있는 455개 중 85개만 보고 있었다.
+    max-new-subscriptions-per-run: ${NEXPLAY_MAX_NEW_SUBSCRIPTIONS:120}
     steam-store:
       timeout-seconds: 12
       # 며칠 지나면 Steam 을 다시 보는가. 458건을 하루 200건씩 도니 한 바퀴가 2.3일이다.

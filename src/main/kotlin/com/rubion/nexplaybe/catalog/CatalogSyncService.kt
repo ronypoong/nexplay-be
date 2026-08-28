@@ -25,6 +25,7 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.absoluteValue
+import org.springframework.beans.factory.annotation.Value
 
 data class CatalogSyncSummary(
     val status: String,
@@ -83,6 +84,14 @@ class CatalogSyncService(
     private val gameRepository: GameRepository,
     private val releaseRepository: ReleaseRepository,
     private val jdbc: JdbcTemplate,
+    /**
+     * 한 번 돌 때 새로 구독할 게임 수.
+     *
+     * 한 번에 다 늘리면 그날 수집이 갑자기 몇 배로 길어지고, 무언가 잘못됐을 때
+     * 되돌리기도 어렵다. 하루 120개씩 늘리면 사나흘이면 전부 덮는다.
+     */
+    @param:Value("\${nexplay.catalog.max-new-subscriptions-per-run:120}")
+    private val maxNewSubscriptionsPerRun: Int,
 ) {
     private val running = AtomicBoolean(false)
 
@@ -446,24 +455,35 @@ class CatalogSyncService(
         return Pair(companyRepository.save(Company(slug = slug, name = ref.name, type = type, wikidataId = ref.wikidataId)), 1)
     }
 
+    /**
+     * 공식 소식을 지켜볼 게임을 늘린다.
+     *
+     * 예전에는 상위 50개만 봤다. `.take(50)` 이 존재 확인보다 먼저 오니 매번 같은
+     * 50개를 보고, 그것들이 이미 구독돼 있으면 새 구독은 영영 생기지 않았다.
+     * 실제로 스팀 ID 가 있는 455개 중 85개만 구독 중이었다.
+     *
+     * 나머지 370개의 발표는 매일 그냥 사라진다. 아카이브는 지켜보는 것만 쌓이고,
+     * 오늘 안 본 발표는 나중에 되살릴 수 없다 — Steam RSS 는 앱당 최근 10건만 준다.
+     *
+     * 아직 구독하지 않은 게임을 먼저 집는다. 그래야 한도가 있어도 매번 앞으로 나간다.
+     */
     private fun refreshMagazineSubscriptions() {
         val steamSource = sourceRepository.findBySlug("steam-news-rss") ?: return
         gameRepository.findAllForDiscovery()
             .asSequence()
             .filter { it.steamAppId != null }
-            .take(MAX_MAGAZINE_SUBSCRIPTIONS)
+            .filterNot { subscriptionRepository.existsBySourceIdAndGameId(steamSource.id, it.id) }
+            .take(maxNewSubscriptionsPerRun)
             .forEach { game ->
-                if (!subscriptionRepository.existsBySourceIdAndGameId(steamSource.id, game.id)) {
-                    val appId = requireNotNull(game.steamAppId)
-                    subscriptionRepository.save(
-                        SourceSubscription(
-                            source = steamSource,
-                            game = game,
-                            externalGameId = appId.toString(),
-                            feedUrl = "https://store.steampowered.com/feeds/news/app/$appId/",
-                        ),
-                    )
-                }
+                val appId = requireNotNull(game.steamAppId)
+                subscriptionRepository.save(
+                    SourceSubscription(
+                        source = steamSource,
+                        game = game,
+                        externalGameId = appId.toString(),
+                        feedUrl = "https://store.steampowered.com/feeds/news/app/$appId/",
+                    ),
+                )
             }
     }
 
@@ -538,7 +558,6 @@ class CatalogSyncService(
 
     private companion object {
         val FEATURED_APP_IDS = setOf(3764200L, 3357650L, 2483190L, 2362060L, 2499860L, 2288340L)
-        const val MAX_MAGAZINE_SUBSCRIPTIONS = 50
         const val MAX_STEAM_DETAILS_PER_SYNC = 24
         const val STEAM_FAILURE_CUTOFF = 5
         val BOILERPLATE_MARKERS = listOf(
