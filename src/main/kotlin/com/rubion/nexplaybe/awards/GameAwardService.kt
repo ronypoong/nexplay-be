@@ -42,13 +42,17 @@ data class GotyResponse(
  * 이유(reason)를 함께 실어 왜 목록에 있는지 화면에서 밝힌다.
  */
 @Service
-@Transactional(readOnly = true)
 class GameAwardService(
     private val client: GameAwardClient,
     private val catalogSyncService: CatalogSyncService,
     private val jdbc: JdbcTemplate,
     private val transactions: TransactionTemplate,
 ) {
+    /**
+     * 클래스에 readOnly 트랜잭션을 걸면 안 된다. 이 메서드는 게임을 추가하고 수상 기록을
+     * 쓰는데, 읽기 전용 커넥션에서는 그대로 실패한다. 게다가 중간에 SPARQL 호출이 있어
+     * 하나의 긴 트랜잭션으로 묶을 것도 아니다 — 기록마다 transactions.execute 로 짧게 연다.
+     */
     fun sync(): AwardSyncSummary {
         val records = client.fetchGameOfTheYear() + client.fetchMostAnticipated()
         if (records.isEmpty()) return AwardSyncSummary("SKIPPED_SOURCE_UNAVAILABLE", 0, 0, 0)
@@ -96,6 +100,7 @@ class GameAwardService(
         return AwardSyncSummary("SUCCESS", records.size, stored, added)
     }
 
+    @Transactional(readOnly = true)
     fun goty(): GotyResponse {
         val rows = jdbc.query(
             """
