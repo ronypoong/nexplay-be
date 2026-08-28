@@ -127,6 +127,12 @@ class PromiseLedgerService(
         val provenance = if (candidate.rawPayload.isNullOrBlank()) "BACKTEST" else "LIVE"
         extraction.promises.forEach { claim ->
             if (claim.claimType !in CLAIM_TYPES) return@forEach
+            // 약속의 창은 발표보다 먼저 시작할 수 없다. 본문에 섞인 과거 연도를
+            // 시점으로 잡는 일이 있다 — Gallipoli 발표에서 1915년을 집어 왔다.
+            val from = claim.claimedFrom.toSqlDate()
+                ?.let { if (it.toLocalDate() < candidate.eventDate) java.sql.Date.valueOf(candidate.eventDate) else it }
+            val to = claim.claimedTo.toSqlDate()
+            val windowValid = from == null || to == null || !to.toLocalDate().isBefore(from.toLocalDate())
             jdbc.update(
                 """
                 INSERT INTO game_promise
@@ -139,8 +145,8 @@ class PromiseLedgerService(
                 """.trimIndent(),
                 candidate.gameId, candidate.eventId, claim.claimType,
                 claim.claimType, claim.claimedValue.take(200), claim.claimedValue.take(200),
-                claim.claimedFrom.toSqlDate(), claim.claimedTo.toSqlDate(),
-                claim.claimPrecision.take(20), claim.sourceQuote.take(500),
+                from.takeIf { windowValid }, to.takeIf { windowValid },
+                if (windowValid) claim.claimPrecision.take(20) else "NONE", claim.sourceQuote.take(500),
                 java.sql.Date.valueOf(candidate.eventDate), provenance, model, PROMPT_VERSION,
             )
         }
@@ -210,15 +216,17 @@ class PromiseLedgerService(
         val superseded = jdbc.update(
             """
             INSERT INTO game_promise_resolution (promise_id, status, actual_value, actual_date, slip_days, evidence)
-            SELECT p.id, 'SUPERSEDED', later.claimed_value, later.claimed_from,
-                   DATEDIFF(later.claimed_from, p.claimed_from),
+            SELECT p.id, 'SUPERSEDED', later.claimed_value, later.claimed_to,
+                   DATEDIFF(later.claimed_to, p.claimed_to),
                    CONCAT('이후 발표(', later.announced_at, ')에서 다시 약속됨')
             FROM game_promise p
             JOIN game_promise later
               ON later.game_id = p.game_id AND later.claim_type = p.claim_type
              AND later.announced_at > p.announced_at AND later.id <> p.id
-            WHERE p.claimed_from IS NOT NULL AND later.claimed_from IS NOT NULL
-              AND later.claimed_from <> p.claimed_from
+            -- 마감끼리 잰다. 시작끼리 재면 "2026년"(1월 시작)과 "2026 가을"(9월 시작)의
+            -- 차이가 실제로 밀린 기간처럼 보인다. 둘 다 2026년 안이라는 뜻일 뿐인데도.
+            WHERE p.claimed_to IS NOT NULL AND later.claimed_to IS NOT NULL
+              AND later.claimed_to > p.claimed_to
             ON DUPLICATE KEY UPDATE status=VALUES(status), actual_value=VALUES(actual_value),
               actual_date=VALUES(actual_date), slip_days=VALUES(slip_days),
               evidence=VALUES(evidence), evaluated_at=CURRENT_TIMESTAMP(6)
