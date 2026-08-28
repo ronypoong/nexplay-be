@@ -48,6 +48,11 @@ class DiscoveryController(
     @GetMapping("/games/{slug}")
     fun game(@PathVariable slug: String) = discoveryService.game(slug)
 
+    /** 같은 장르 기반 관련작. 상세 화면이 전체 카탈로그를 받지 않도록 서버에서 고른다. */
+    @GetMapping("/games/{slug}/related")
+    fun related(@PathVariable slug: String, @RequestParam(defaultValue = "3") limit: Int) =
+        discoveryService.related(slug, limit)
+
     @GetMapping("/games/{slug}/events")
     fun events(@PathVariable slug: String) = discoveryService.events(slug)
 

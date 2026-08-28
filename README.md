@@ -27,6 +27,7 @@ DB 계정 정보는 코드에 기본값이 없습니다. `application.yaml` 의
 | `SERVER_PORT` | `4004` |
 | `NEXPLAY_DAILY_SYNC_CRON` | `0 0 6 * * *` |
 | `NEXPLAY_DAILY_SYNC_ZONE` | `Asia/Seoul` |
+| `NEXPLAY_ADMIN_TOKEN` | 없음 (비우면 관리 API 차단) |
 | `NEXPLAY_CORS_ALLOWED_ORIGINS` | `http://localhost:3003,http://127.0.0.1:3003` |
 
 운영 환경에서는 DB 접속 정보와 관리 API 보호 설정을 별도로 구성해야 합니다.
@@ -49,7 +50,18 @@ DB 계정 정보는 코드에 기본값이 없습니다. `application.yaml` 의
 - `POST /api/v1/admin/collectors/steam/run`
 - `GET /actuator/health`
 
-관리 API는 현재 MVP 단계로 인증이 없으므로 외부에 그대로 공개하지 마세요.
+### 관리 API 인증
+
+`/api/v1/admin` 이하는 토큰이 필요합니다.
+
+```bash
+curl -X POST 'http://localhost:4004/api/v1/admin/collectors/steam/run' \
+  -H "X-NEXPLAY-Admin-Token: $NEXPLAY_ADMIN_TOKEN"
+```
+
+`NEXPLAY_ADMIN_TOKEN` 이 비어 있으면 관리 API 전체가 `503` 으로 막힙니다.
+설정을 잊었을 때 열린 채로 뜨는 것보다 닫힌 채로 뜨는 편이 안전하기 때문입니다.
+토큰이 틀리면 `401` 입니다.
 
 ## 데이터 수집
 
@@ -63,7 +75,8 @@ DB 계정 정보는 코드에 기본값이 없습니다. `application.yaml` 의
 자동 동기화는 애플리케이션 프로세스가 살아 있을 때만 실행됩니다. 수동 실행은 다음과 같습니다.
 
 ```bash
-curl -sS -X POST 'http://localhost:4004/api/v1/admin/catalog/wikidata/sync?year=2026'
+curl -sS -X POST 'http://localhost:4004/api/v1/admin/catalog/wikidata/sync?year=2026' \
+  -H "X-NEXPLAY-Admin-Token: $NEXPLAY_ADMIN_TOKEN"
 curl -sS -X POST 'http://localhost:4004/api/v1/admin/catalog/wikidata/classifications?limit=1000'
 curl -sS -X POST http://localhost:4004/api/v1/admin/collectors/steam/run
 curl -sS http://localhost:4004/api/v1/admin/collectors/runs

@@ -55,14 +55,63 @@ data class GameEventResponse(
 
 data class ReleaseResponse(
     val id: String,
-    val game: GameResponse,
+    val game: GameCardResponse,
     val platform: String,
     val releaseDate: String,
     val status: String,
     val region: String,
 )
 
-data class FeedResponse(val games: List<GameResponse>, val events: List<GameEventResponse>)
+/**
+ * 목록용 게임. description 이 빠져 있다.
+ *
+ * Steam 소개문을 붙이면서 게임당 500~950자가 됐다. /feed 가 458개를 실어 나르면
+ * 그 필드 하나로만 300KB 가 넘는데, 카드와 캐러셀 어디에서도 쓰지 않는다.
+ * 소개는 상세 화면에서 한 건씩 받는다.
+ */
+data class GameCardResponse(
+    val id: String,
+    val slug: String,
+    val title: String,
+    val tagline: String,
+    val developer: String,
+    val publisher: String,
+    val genres: List<String>,
+    val platforms: List<String>,
+    val gameModes: List<String>,
+    val koreanTextSupported: Boolean?,
+    val koreanAudioSupported: Boolean?,
+    val releaseDate: String,
+    val releaseLabel: String,
+    val steamAppId: Long?,
+    val coverImageUrl: String?,
+    val status: String,
+    val score: Int,
+    val anticipationScore: Int,
+    val followers: String,
+    val accent: String,
+    val accent2: String,
+    val symbol: String,
+    val featured: Boolean,
+)
+
+/** 홈이 배열 길이로 세던 값들. 목록을 자르면 그 수가 틀려지므로 서버가 진짜 총계를 준다. */
+data class FeedStats(
+    val totalGames: Int,
+    val currentYearGames: Int,
+    val totalEvents: Int,
+    val upcomingGames: Int,
+    val updateEvents: Int,
+    val expansionEvents: Int,
+)
+
+data class FeedResponse(
+    val games: List<GameCardResponse>,
+    val upcoming: List<GameCardResponse>,
+    val hiddenGems: List<GameCardResponse>,
+    val events: List<GameEventResponse>,
+    val stats: FeedStats,
+)
 
 fun Game.toResponse() = GameResponse(
     id = id.toString(), slug = slug, title = title, tagline = tagline, description = description,
@@ -87,7 +136,20 @@ fun GameEvent.toResponse(clock: Clock): GameEventResponse {
     )
 }
 
-fun Release.toResponse() = ReleaseResponse(id.toString(), game.toResponse(), platform, releaseDate.toString(), status.name, region)
+fun Game.toCardResponse() = GameCardResponse(
+    id = id.toString(), slug = slug, title = title, tagline = tagline,
+    developer = developer.name, publisher = publisher.name,
+    genres = genres.sorted(), platforms = platforms.sortedBy(::platformOrder), gameModes = gameModes.sorted(),
+    koreanTextSupported = koreanTextSupported, koreanAudioSupported = koreanAudioSupported,
+    releaseDate = releaseDate?.toString() ?: "TBA", releaseLabel = releaseLabel,
+    steamAppId = steamAppId, coverImageUrl = coverImageUrl,
+    status = when (status) { GameStatus.AVAILABLE -> "Available"; GameStatus.UPCOMING -> "Upcoming"; GameStatus.TBA -> "TBA" },
+    score = discoveryScore.toInt(), anticipationScore = anticipationScore.toInt(),
+    followers = formatFollowers(followerCount), accent = accent, accent2 = accentSecondary,
+    symbol = symbol, featured = featured,
+)
+
+fun Release.toResponse() = ReleaseResponse(id.toString(), game.toCardResponse(), platform, releaseDate.toString(), status.name, region)
 
 private fun platformOrder(value: String) = listOf("PC", "PS5", "Xbox", "Switch 2", "미정").indexOf(value).let { if (it < 0) 99 else it }
 private fun formatFollowers(value: Long) = if (value >= 1_000) "%.1fK".format(value / 1_000.0) else value.toString()

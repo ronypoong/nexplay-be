@@ -36,6 +36,9 @@ management:
       show-details: always
 
 nexplay:
+  admin:
+    # 비어 있으면 관리 API 는 503 으로 막힌다. 설정을 잊었을 때 열리는 것보다 닫히는 편이 안전하다.
+    token: ${NEXPLAY_ADMIN_TOKEN:}
   cors:
     allowed-origins: "${NEXPLAY_CORS_ALLOWED_ORIGINS:http://localhost:3003,http://127.0.0.1:3003}"
   daily-sync:

@@ -1,17 +1,23 @@
 package com.rubion.nexplaybe.discovery
 
 import com.rubion.nexplaybe.api.FeedResponse
+import com.rubion.nexplaybe.api.FeedStats
+import com.rubion.nexplaybe.api.GameCardResponse
 import com.rubion.nexplaybe.api.GameEventResponse
 import com.rubion.nexplaybe.api.GameResponse
 import com.rubion.nexplaybe.api.ReleaseResponse
+import com.rubion.nexplaybe.api.toCardResponse
 import com.rubion.nexplaybe.api.toResponse
 import com.rubion.nexplaybe.event.GameEventRepository
 import com.rubion.nexplaybe.game.GameRepository
 import com.rubion.nexplaybe.release.ReleaseRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import com.rubion.nexplaybe.event.GameEventType
+import com.rubion.nexplaybe.game.GameStatus
 import java.time.Clock
 import java.time.LocalDate
+import java.time.ZoneId
 
 @Service
 @Transactional(readOnly = true)
@@ -22,12 +28,60 @@ class DiscoveryService(
 ) {
     private val clock: Clock = Clock.systemUTC()
 
-    fun feed(): FeedResponse = FeedResponse(
-        games = gameRepository.findAllForDiscovery().map { it.toResponse() },
-        events = eventRepository.findFeedEvents().map { it.toResponse(clock) },
-    )
+    /**
+     * 홈이 쓰는 것만 골라 보낸다.
+     *
+     * 예전에는 게임 458개와 이벤트 363개를 통째로 보내고(772KB) 클라이언트가 잘라 썼다.
+     * 홈이 실제로 그리는 건 캐러셀 몇 개와 출시 예정 10개, 소식 5개다.
+     * 배열 길이로 세던 통계는 stats 로 따로 준다 — 목록을 자르면 그 수가 틀려지기 때문이다.
+     */
+    fun feed(): FeedResponse {
+        val games = gameRepository.findAllForDiscovery()
+        val events = eventRepository.findFeedEvents()
+        val today = LocalDate.now(ZoneId.of(SEOUL))
+        val currentYear = today.year.toString()
 
-    fun games(platform: String?, genre: String?, query: String?): List<GameResponse> =
+        val upcomingAll = games
+            .filter { it.status == GameStatus.UPCOMING && it.releaseDate?.isBefore(today) == false }
+            .sortedBy { it.releaseDate }
+        // 대형사도 featured 도 아닌, 점수가 낮은 출시 예정작 — 정렬 상위를 그대로 쓰면 "숨은" 이 아니다.
+        val hiddenGems = games
+            .filter { !it.featured && it.status == GameStatus.UPCOMING }
+            .sortedWith(compareBy({ it.discoveryScore }, { -it.anticipationScore.toInt() }))
+            .take(HIDDEN_GEM_COUNT)
+
+        return FeedResponse(
+            games = games.take(FEED_GAME_LIMIT).map { it.toCardResponse() },
+            upcoming = upcomingAll.take(UPCOMING_LIMIT).map { it.toCardResponse() },
+            hiddenGems = hiddenGems.map { it.toCardResponse() },
+            events = events.take(FEED_EVENT_LIMIT).map { it.toResponse(clock) },
+            stats = FeedStats(
+                totalGames = games.size,
+                currentYearGames = games.count { it.releaseDate?.year?.toString() == currentYear },
+                totalEvents = events.size,
+                upcomingGames = upcomingAll.size,
+                updateEvents = events.count { it.type == GameEventType.MAJOR_UPDATE || it.type == GameEventType.PATCH },
+                expansionEvents = events.count { it.type == GameEventType.EXPANSION || it.type == GameEventType.DLC },
+            ),
+        )
+    }
+
+    /** 같은 장르를 공유하는 게임. 상세 화면이 전체 카탈로그를 받아 3개만 쓰던 것을 대신한다. */
+    fun related(slug: String, limit: Int = 3): List<GameCardResponse> {
+        val game = gameRepository.findBySlug(slug) ?: throw ResourceNotFoundException("Game not found: $slug")
+        if (game.genres.isEmpty()) return emptyList()
+        return gameRepository.findAllForDiscovery()
+            .asSequence()
+            .filter { it.slug != slug }
+            .map { it to it.genres.count { genre -> genre in game.genres } }
+            .filter { it.second > 0 }
+            .sortedWith(compareByDescending<Pair<com.rubion.nexplaybe.game.Game, Int>> { it.second }.thenByDescending { it.first.discoveryScore })
+            .take(limit.coerceIn(1, 12))
+            .map { it.first.toCardResponse() }
+            .toList()
+    }
+
+    fun games(platform: String?, genre: String?, query: String?): List<GameCardResponse> =
         gameRepository.findAllForDiscovery()
             .asSequence()
             .filter { platform.isNullOrBlank() || it.platforms.any { value -> value.equals(platform, true) } }
@@ -37,7 +91,7 @@ class DiscoveryService(
                     .plus(it.genres).plus(it.platforms)
                     .any { value -> value.contains(query, true) }
             }
-            .map { it.toResponse() }
+            .map { it.toCardResponse() }
             .toList()
 
     fun game(slug: String): GameResponse = gameRepository.findBySlug(slug)?.toResponse()
@@ -56,6 +110,14 @@ class DiscoveryService(
             .filter { platform.isNullOrBlank() || it.platform.equals(platform, true) }
             .map { it.toResponse() }
             .toList()
+
+    private companion object {
+        const val SEOUL = "Asia/Seoul"
+        const val FEED_GAME_LIMIT = 40
+        const val FEED_EVENT_LIMIT = 30
+        const val UPCOMING_LIMIT = 10
+        const val HIDDEN_GEM_COUNT = 2
+    }
 }
 
 class ResourceNotFoundException(message: String) : RuntimeException(message)
