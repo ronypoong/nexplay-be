@@ -57,3 +57,18 @@ tasks.named('test') {
 tasks.named('jar') {
     enabled = false
 }
+
+/*
+ * 배포된 것이 언제 빌드된 것인지 밖에서 확인할 수 있게 한다.
+ *
+ * 예전에 푸시가 GitHub 쪽 오류로 안 올라갔는데 그걸 모르고 옛 코드에 대고
+ * 동기화를 열일곱 번 돌린 적이 있다. "올렸으니 떠 있겠지" 를 확인할 방법이
+ * 없으면 같은 일이 또 난다.
+ *
+ * 커밋 해시는 여기서 넣지 않는다. Dockerfile 이 .git 을 복사하지 않아
+ * 컨테이너 안에서는 git 을 부를 수 없다. 커밋은 Railway 가 넘겨주는
+ * 환경변수를 application.yaml 에서 받는다.
+ */
+springBoot {
+    buildInfo()
+}
