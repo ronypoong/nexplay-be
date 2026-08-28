@@ -55,6 +55,14 @@ data class GameEventResponse(
     val source: String,
     val official: Boolean,
     val sourceCount: Int,
+    /** 모델이 원문에서 뽑은 한국어 한 줄. 원문이 영어·일본어라 이게 없으면 제목만 남는다. */
+    val summaryKo: String? = null,
+    /** 체험판 배포를 알리는 글인가. 카드에 표시해 준다. */
+    val hasDemo: Boolean = false,
+    /** 원문에 명시된 할인율. 없으면 null */
+    val discountPercent: Int? = null,
+    /** 게임 내용과 무관한 마케팅·커뮤니티 잡음인가. 홈에서는 빼고 게임 이력에는 남긴다. */
+    val marketingNoise: Boolean = false,
 )
 
 data class ReleaseResponse(
@@ -130,14 +138,23 @@ fun Game.toResponse(awardBadge: AwardBadge? = null) = GameResponse(
     accent2 = accentSecondary, symbol = symbol, featured = featured, awardBadge = awardBadge,
 )
 
-fun GameEvent.toResponse(clock: Clock): GameEventResponse {
+fun GameEvent.toResponse(
+    clock: Clock,
+    insight: com.rubion.nexplaybe.intelligence.EventInsight? = null,
+): GameEventResponse {
     val orderedSources = sources.sortedWith(compareByDescending<com.rubion.nexplaybe.event.GameEventSource> { it.source.official }.thenBy { it.id })
     val primary = orderedSources.firstOrNull()
     return GameEventResponse(
-        id = id.toString(), gameSlug = game.slug, type = type.name, title = title, summary = summary,
+        id = id.toString(), gameSlug = game.slug,
+        type = insight?.trustworthyType ?: type.name,
+        title = title, summary = summary,
         date = eventDate.toString(), dateLabel = relativeDateLabel(publishedAt, eventDate, clock),
         source = primary?.source?.name ?: "NEXPLAY", official = orderedSources.any { it.source.official },
         sourceCount = orderedSources.size,
+        summaryKo = insight?.summaryKo,
+        hasDemo = insight?.hasDemo ?: false,
+        discountPercent = insight?.discountPercent,
+        marketingNoise = insight?.marketingNoise ?: false,
     )
 }
 

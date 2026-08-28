@@ -13,6 +13,7 @@ import com.rubion.nexplaybe.event.GameEventRepository
 import com.rubion.nexplaybe.game.GameRepository
 import com.rubion.nexplaybe.release.ReleaseRepository
 import com.rubion.nexplaybe.cache.CacheConfig
+import com.rubion.nexplaybe.intelligence.EventInsightLookup
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -30,6 +31,7 @@ class DiscoveryService(
     private val eventRepository: GameEventRepository,
     private val releaseRepository: ReleaseRepository,
     private val awardBadgeLookup: AwardBadgeLookup,
+    private val eventInsightLookup: EventInsightLookup,
 ) {
     private val clock: Clock = Clock.systemUTC()
 
@@ -43,7 +45,10 @@ class DiscoveryService(
     @Cacheable(CacheConfig.SECTIONS, key = "'feed'")
     fun feed(): FeedResponse {
         val games = catalogSnapshot.entries()
-        val events = eventRepository.findFeedEvents()
+        val insights = eventInsightLookup.insights()
+        // 마케팅 잡음은 홈에서 뺀다. 분류한 54건 중 17건이 그랬다. 지우지는 않는다 —
+        // 게임 이력에는 그대로 남고, 표시만 달아 준다.
+        val events = eventRepository.findFeedEvents().filterNot { insights[it.id]?.marketingNoise == true }
         val today = LocalDate.now(ZoneId.of(SEOUL))
         val currentYear = today.year
 
@@ -60,7 +65,7 @@ class DiscoveryService(
             games = games.take(FEED_GAME_LIMIT).map { it.card },
             upcoming = upcomingAll.take(UPCOMING_LIMIT).map { it.card },
             hiddenGems = hiddenGems.map { it.card },
-            events = events.take(FEED_EVENT_LIMIT).map { it.toResponse(clock) },
+            events = events.take(FEED_EVENT_LIMIT).map { it.toResponse(clock, insights[it.id]) },
             stats = FeedStats(
                 totalGames = games.size,
                 currentYearGames = games.count { it.releaseDate?.year == currentYear },
@@ -113,7 +118,10 @@ class DiscoveryService(
     @Cacheable(CacheConfig.GAME_EVENTS)
     fun events(slug: String): List<GameEventResponse> {
         if (gameRepository.findBySlug(slug) == null) throw ResourceNotFoundException("Game not found: $slug")
-        return eventRepository.findByGameSlug(slug).map { it.toResponse(clock) }
+        // 게임 한 대의 이력에서는 잡음도 빼지 않는다. 무엇이 있었는지가 기록이고,
+        // 잡음이라는 판단 자체도 화면에서 볼 수 있어야 뒤집을 수 있다.
+        val insights = eventInsightLookup.insights()
+        return eventRepository.findByGameSlug(slug).map { it.toResponse(clock, insights[it.id]) }
     }
 
     fun releases(from: LocalDate?, to: LocalDate?, platform: String?): List<ReleaseResponse> =
