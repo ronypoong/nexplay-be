@@ -23,7 +23,9 @@ spring:
     locations: classpath:db/migration
 
 server:
-  port: ${SERVER_PORT:8080}
+  # Railway 같은 PaaS 는 포트를 실행 시점에 정해 PORT 로 넘긴다.
+  # 8080 을 박아두면 "열린 포트가 없다"며 배포가 실패한다.
+  port: ${PORT:${SERVER_PORT:8080}}
   shutdown: graceful
 
 management:
@@ -40,7 +42,7 @@ nexplay:
     # 비어 있으면 관리 API 는 503 으로 막힌다. 설정을 잊었을 때 열리는 것보다 닫히는 편이 안전하다.
     token: ${NEXPLAY_ADMIN_TOKEN:}
   cors:
-    allowed-origins: "${NEXPLAY_CORS_ALLOWED_ORIGINS:http://localhost:3003,http://127.0.0.1:3003}"
+    allowed-origins: "${NEXPLAY_CORS_ALLOWED_ORIGINS:https://nexplay.rubi-on.com,http://localhost:3003,http://127.0.0.1:3003}"
   daily-sync:
     cron: ${NEXPLAY_DAILY_SYNC_CRON:0 0 6 * * *}
     zone: ${NEXPLAY_DAILY_SYNC_ZONE:Asia/Seoul}

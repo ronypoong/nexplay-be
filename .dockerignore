@@ -1,0 +1,10 @@
+# 빌드 컨텍스트를 줄이고, 무엇보다 자격증명을 이미지에 넣지 않는다.
+.git
+.gradle
+build
+.idea
+.kotlin
+*.iml
+.env
+.env.*
+!.env.example

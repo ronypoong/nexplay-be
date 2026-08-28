@@ -24,7 +24,7 @@ DB 계정 정보는 코드에 기본값이 없습니다. `application.yaml` 의
 | `NEXPLAY_DB_URL` | `jdbc:mysql://127.0.0.1:3306/nexplay?...` |
 | `NEXPLAY_DB_USERNAME` | 없음 (필수) |
 | `NEXPLAY_DB_PASSWORD` | 없음 (필수) |
-| `SERVER_PORT` | `4004` |
+| `PORT` / `SERVER_PORT` | `4004` (PaaS 는 `PORT` 를 주입) |
 | `NEXPLAY_DAILY_SYNC_CRON` | `0 0 6 * * *` |
 | `NEXPLAY_DAILY_SYNC_ZONE` | `Asia/Seoul` |
 | `NEXPLAY_ADMIN_TOKEN` | 없음 (비우면 관리 API 차단) |
@@ -91,3 +91,21 @@ GRADLE_USER_HOME=.gradle ./gradlew test
 ```
 
 일부 로컬 환경에서는 테스트가 실행 중인 `bootRun`을 종료할 수 있으므로 테스트 뒤 `4004` 포트를 다시 확인하세요.
+
+## 배포
+
+Railway 는 Dockerfile 로 빌드합니다(`railway.json`). Nixpacks 기본 실행 명령은
+`java -jar */build/libs/*jar` 라 하위 모듈을 가정하는데, 이 프로젝트는 단일 모듈이라
+경로가 맞지 않습니다.
+
+배포 환경에 넣어야 하는 값은 다음과 같습니다.
+
+| 변수 | 비고 |
+|---|---|
+| `NEXPLAY_DB_URL` / `NEXPLAY_DB_USERNAME` / `NEXPLAY_DB_PASSWORD` | 필수 |
+| `NEXPLAY_ADMIN_TOKEN` | 비우면 관리 API 가 503 으로 막힘 |
+| `NEXPLAY_CORS_ALLOWED_ORIGINS` | 기본값에 `https://nexplay.rubi-on.com` 포함 |
+| `PORT` | Railway 가 자동 주입 |
+
+- 프론트엔드 `https://nexplay.rubi-on.com`
+- 백엔드 `https://nexplay-api.rubi-on.com`
