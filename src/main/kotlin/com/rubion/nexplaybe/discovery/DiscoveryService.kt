@@ -1,5 +1,7 @@
 package com.rubion.nexplaybe.discovery
 
+import com.rubion.nexplaybe.api.AwardBadge
+import com.rubion.nexplaybe.awards.AwardBadgeLookup
 import com.rubion.nexplaybe.api.FeedResponse
 import com.rubion.nexplaybe.api.FeedStats
 import com.rubion.nexplaybe.api.GameCardResponse
@@ -25,6 +27,7 @@ class DiscoveryService(
     private val gameRepository: GameRepository,
     private val eventRepository: GameEventRepository,
     private val releaseRepository: ReleaseRepository,
+    private val awardBadgeLookup: AwardBadgeLookup,
 ) {
     private val clock: Clock = Clock.systemUTC()
 
@@ -38,6 +41,7 @@ class DiscoveryService(
     fun feed(): FeedResponse {
         val games = gameRepository.findAllForDiscovery()
         val events = eventRepository.findFeedEvents()
+        val badges = awardBadgeLookup.badges()
         val today = LocalDate.now(ZoneId.of(SEOUL))
         val currentYear = today.year.toString()
 
@@ -51,9 +55,9 @@ class DiscoveryService(
             .take(HIDDEN_GEM_COUNT)
 
         return FeedResponse(
-            games = games.take(FEED_GAME_LIMIT).map { it.toCardResponse() },
-            upcoming = upcomingAll.take(UPCOMING_LIMIT).map { it.toCardResponse() },
-            hiddenGems = hiddenGems.map { it.toCardResponse() },
+            games = games.take(FEED_GAME_LIMIT).map { it.toCardResponse(badges[it.id]) },
+            upcoming = upcomingAll.take(UPCOMING_LIMIT).map { it.toCardResponse(badges[it.id]) },
+            hiddenGems = hiddenGems.map { it.toCardResponse(badges[it.id]) },
             events = events.take(FEED_EVENT_LIMIT).map { it.toResponse(clock) },
             stats = FeedStats(
                 totalGames = games.size,
@@ -77,12 +81,13 @@ class DiscoveryService(
             .filter { it.second > 0 }
             .sortedWith(compareByDescending<Pair<com.rubion.nexplaybe.game.Game, Int>> { it.second }.thenByDescending { it.first.discoveryScore })
             .take(limit.coerceIn(1, 12))
-            .map { it.first.toCardResponse() }
+            .map { it.first.toCardResponse(awardBadgeLookup.badges()[it.first.id]) }
             .toList()
     }
 
-    fun games(platform: String?, genre: String?, query: String?): List<GameCardResponse> =
-        gameRepository.findAllForDiscovery()
+    fun games(platform: String?, genre: String?, query: String?): List<GameCardResponse> {
+        val badges = awardBadgeLookup.badges()
+        return gameRepository.findAllForDiscovery()
             .asSequence()
             .filter { platform.isNullOrBlank() || it.platforms.any { value -> value.equals(platform, true) } }
             .filter { genre.isNullOrBlank() || it.genres.any { value -> value.equals(genre, true) } }
@@ -91,11 +96,14 @@ class DiscoveryService(
                     .plus(it.genres).plus(it.platforms)
                     .any { value -> value.contains(query, true) }
             }
-            .map { it.toCardResponse() }
+            .map { it.toCardResponse(badges[it.id]) }
             .toList()
+    }
 
-    fun game(slug: String): GameResponse = gameRepository.findBySlug(slug)?.toResponse()
-        ?: throw ResourceNotFoundException("Game not found: $slug")
+    fun game(slug: String): GameResponse {
+        val game = gameRepository.findBySlug(slug) ?: throw ResourceNotFoundException("Game not found: $slug")
+        return game.toResponse(awardBadgeLookup.badges()[game.id])
+    }
 
     fun events(slug: String): List<GameEventResponse> {
         if (gameRepository.findBySlug(slug) == null) throw ResourceNotFoundException("Game not found: $slug")

@@ -9,6 +9,9 @@ import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 
+/** 카드에 다는 수상 배지. 가장 무게 있는 기록 하나만 고른다. */
+data class AwardBadge(val label: String, val year: Int, val kind: String)
+
 data class GameResponse(
     val id: String,
     val slug: String,
@@ -38,6 +41,7 @@ data class GameResponse(
     val accent2: String,
     val symbol: String,
     val featured: Boolean,
+    val awardBadge: AwardBadge? = null,
 )
 
 data class GameEventResponse(
@@ -93,6 +97,7 @@ data class GameCardResponse(
     val accent2: String,
     val symbol: String,
     val featured: Boolean,
+    val awardBadge: AwardBadge? = null,
 )
 
 /** 홈이 배열 길이로 세던 값들. 목록을 자르면 그 수가 틀려지므로 서버가 진짜 총계를 준다. */
@@ -113,7 +118,7 @@ data class FeedResponse(
     val stats: FeedStats,
 )
 
-fun Game.toResponse() = GameResponse(
+fun Game.toResponse(awardBadge: AwardBadge? = null) = GameResponse(
     id = id.toString(), slug = slug, title = title, tagline = tagline, description = description,
     developer = developer.name, publisher = publisher.name, genres = genres.sorted(), platforms = platforms.sortedBy(::platformOrder),
     gameModes = gameModes.sorted(), koreanTextSupported = koreanTextSupported, koreanAudioSupported = koreanAudioSupported,
@@ -122,7 +127,7 @@ fun Game.toResponse() = GameResponse(
     coverImageUrl = coverImageUrl, imageSource = imageSource,
     status = when (status) { GameStatus.AVAILABLE -> "Available"; GameStatus.UPCOMING -> "Upcoming"; GameStatus.TBA -> "TBA" },
     score = discoveryScore.toInt(), anticipationScore = anticipationScore.toInt(), followers = formatFollowers(followerCount), accent = accent,
-    accent2 = accentSecondary, symbol = symbol, featured = featured,
+    accent2 = accentSecondary, symbol = symbol, featured = featured, awardBadge = awardBadge,
 )
 
 fun GameEvent.toResponse(clock: Clock): GameEventResponse {
@@ -136,7 +141,7 @@ fun GameEvent.toResponse(clock: Clock): GameEventResponse {
     )
 }
 
-fun Game.toCardResponse() = GameCardResponse(
+fun Game.toCardResponse(awardBadge: AwardBadge? = null) = GameCardResponse(
     id = id.toString(), slug = slug, title = title, tagline = tagline,
     developer = developer.name, publisher = publisher.name,
     genres = genres.sorted(), platforms = platforms.sortedBy(::platformOrder), gameModes = gameModes.sorted(),
@@ -146,7 +151,7 @@ fun Game.toCardResponse() = GameCardResponse(
     status = when (status) { GameStatus.AVAILABLE -> "Available"; GameStatus.UPCOMING -> "Upcoming"; GameStatus.TBA -> "TBA" },
     score = discoveryScore.toInt(), anticipationScore = anticipationScore.toInt(),
     followers = formatFollowers(followerCount), accent = accent, accent2 = accentSecondary,
-    symbol = symbol, featured = featured,
+    symbol = symbol, featured = featured, awardBadge = awardBadge,
 )
 
 fun Release.toResponse() = ReleaseResponse(id.toString(), game.toCardResponse(), platform, releaseDate.toString(), status.name, region)
