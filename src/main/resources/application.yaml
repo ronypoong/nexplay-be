@@ -98,6 +98,8 @@ nexplay:
     # 소금 없는 해시는 그대로 IP 의 별칭이라 익명이 아니다.
     salt: ${NEXPLAY_ANTICIPATION_SALT:}
     daily-limit: ${NEXPLAY_ANTICIPATION_DAILY_LIMIT:40}
+    # 투표자 해시를 되돌릴 수 없게 바꾸기까지의 기간. 처리방침에 적은 값과 같아야 한다.
+    hash-retention-days: ${NEXPLAY_ANTICIPATION_HASH_RETENTION_DAYS:180}
   admin:
     # 비어 있으면 관리 API 는 503 으로 막힌다. 설정을 잊었을 때 열리는 것보다 닫히는 편이 안전하다.
     token: ${NEXPLAY_ADMIN_TOKEN:}

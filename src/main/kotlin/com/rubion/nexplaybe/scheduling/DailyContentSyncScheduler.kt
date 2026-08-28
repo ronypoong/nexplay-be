@@ -2,6 +2,7 @@ package com.rubion.nexplaybe.scheduling
 
 import com.rubion.nexplaybe.awards.AwardSyncSummary
 import com.rubion.nexplaybe.awards.GameAwardService
+import com.rubion.nexplaybe.anticipation.VoterHashRetention
 import com.rubion.nexplaybe.cache.ReadCacheEvictor
 import com.rubion.nexplaybe.catalog.CatalogSyncService
 import com.rubion.nexplaybe.intelligence.EventIntelligenceService
@@ -35,6 +36,7 @@ class DailyContentSyncScheduler(
     private val promiseLedgerService: PromiseLedgerService,
     private val readCacheEvictor: ReadCacheEvictor,
     private val syncRunRecorder: SyncRunRecorder,
+    private val voterHashRetention: VoterHashRetention,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -65,6 +67,8 @@ class DailyContentSyncScheduler(
         val promises = step("promise-extraction", PromiseSyncSummary("FAILED", 0, 0, 0)) { promiseLedgerService.extractPromises() }
         // 채점은 모델 없이도 돌아야 한다. 추출이 실패해도 어제까지 적힌 약속은 오늘 채점된다.
         val resolutions = step("promise-resolution", ResolutionSummary(0, 0, 0, 0, 0)) { promiseLedgerService.resolve() }
+        // 처리방침에 적은 기간을 코드가 실제로 지키게 한다.
+        step("voter-hash-retention", 0) { voterHashRetention.anonymizeOldHashes() }
         // 오늘치가 다 들어왔으니 어제 계산해 둔 목록은 버린다.
         readCacheEvictor.evictQuietly()
         log.info(
