@@ -88,6 +88,27 @@ class RichMetadataIngestionService(
         val appId = requireNotNull(game.steamAppId)
         val sourceUrl = "https://store.steampowered.com/app/$appId"
         val now = Timestamp.from(Instant.now())
+
+        /*
+         * 대표 이미지가 비어 있으면 채운다.
+         *
+         * 매일 Steam 에서 header_image 를 받아 오면서 저장은 하지 않고 있었다.
+         * 이미지는 카탈로그에 처음 넣을 때만 채워지므로, 그 시점에 Steam 을 못
+         * 불렀거나 앱 ID 를 나중에 알게 된 게임은 영영 비어 있었다. 실제로
+         * 사진 없는 25개 중 14개가 확장 수집을 거치고도 그대로였다.
+         *
+         * 이미 있는 것은 덮지 않는다. 사람이 손으로 넣었거나 다른 출처에서 온
+         * 것일 수 있고, 그걸 자동 수집이 밀어내면 안 된다.
+         */
+        if (game.coverImageUrl.isNullOrBlank() && data.headerImageUrl.isNotBlank()) {
+            jdbc.update("UPDATE game SET cover_image_url = ? WHERE id = ?", data.headerImageUrl, game.id)
+            jdbc.update(
+                """INSERT INTO game_data_provenance (game_id,field_name,source_name,source_url,confidence,verified_at)
+                VALUES (?,'cover_image','Steam Store',?,'HIGH',?) ON DUPLICATE KEY UPDATE verified_at=VALUES(verified_at)""",
+                game.id, sourceUrl, now,
+            )
+        }
+
         if (data.gameModes.isNotEmpty()) {
             game.gameModes.clear()
             game.gameModes.addAll(data.gameModes)
