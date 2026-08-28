@@ -9,11 +9,10 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.MediaType
 import org.springframework.http.client.JdkClientHttpRequestFactory
 import org.springframework.stereotype.Component
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.web.client.RestClient
 import java.net.http.HttpClient
 import java.time.Duration
-import java.time.LocalDate
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 모델 호출 창구.
@@ -30,6 +29,7 @@ class BudgetExhaustedException(budget: Long, spent: Long) :
 
 @Component
 class OpenAiExtractor(
+    private val jdbc: JdbcTemplate,
     @param:Value("\${nexplay.intelligence.api-key:}") private val apiKey: String,
     @param:Value("\${nexplay.intelligence.model:gpt-5.4-mini}") val model: String,
     @param:Value("\${nexplay.intelligence.base-url:https://api.openai.com/v1}") private val baseUrl: String,
@@ -46,20 +46,21 @@ class OpenAiExtractor(
         RestClient.builder().requestFactory(factory).build()
     }
 
-    // 상한을 두는 이유는 아끼려는 게 아니라, 버그나 설정 실수로 폭주할 때
-    // 요금이 무한정 나가는 걸 막는 것이다. 하루가 바뀌면 저절로 풀린다.
-    private val spentToday = AtomicLong(0)
-    @Volatile private var budgetDate: LocalDate = LocalDate.now()
+    /**
+     * 오늘 쓴 토큰. **DB 에서 읽는다.**
+     *
+     * 예전에는 메모리 카운터였다. 배포할 때마다 컨테이너가 새로 뜨면서 0 으로
+     * 돌아갔고, 하루에 열 번 배포하면 상한이 열 번 풀렸다. 폭주를 막으려고 둔
+     * 장치가 정작 폭주를 못 막았다.
+     */
+    fun tokensSpentToday(): Long = runCatching {
+        jdbc.queryForObject(
+            "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage WHERE usage_date = CURRENT_DATE",
+            Long::class.java,
+        ) ?: 0L
+    }.getOrDefault(0L)
 
-    @Synchronized
-    private fun hasRoom(): Boolean {
-        val today = LocalDate.now()
-        if (today != budgetDate) {
-            budgetDate = today
-            spentToday.set(0)
-        }
-        return spentToday.get() < dailyTokenBudget
-    }
+    private fun hasRoom(): Boolean = tokensSpentToday() < dailyTokenBudget
 
     /**
      * 스키마에 맞춰 한 번 뽑는다.
@@ -78,7 +79,7 @@ class OpenAiExtractor(
         if (!enabled) return null
         // 예산 소진을 null 로 돌려주면 부르는 쪽에서 "약속이 없었다" 와 구분할 수 없다.
         // 실제로 배치 아홉 번이 아무 일도 안 하고 SUCCESS 를 보고한 적이 있다.
-        if (!hasRoom()) throw BudgetExhaustedException(dailyTokenBudget, spentToday.get())
+        if (!hasRoom()) throw BudgetExhaustedException(dailyTokenBudget, tokensSpentToday())
 
         val body = mapOf(
             "model" to model,
@@ -101,7 +102,24 @@ class OpenAiExtractor(
             .retrieve()
             .body(ChatResponse::class.java) ?: return null
 
-        response.usage?.let { spentToday.addAndGet(it.totalTokens.toLong()) }
+        // 기록에 실패해도 추출은 살린다. 다만 기록이 빠지면 상한이 헐거워지므로
+        // 조용히 넘기지 않고 남긴다.
+        response.usage?.let { usage ->
+            runCatching {
+                jdbc.update(
+                    """
+                    INSERT INTO llm_usage (usage_date, purpose, model, calls, prompt_tokens, completion_tokens, total_tokens)
+                    VALUES (CURRENT_DATE, ?, ?, 1, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE calls = calls + 1,
+                      prompt_tokens = prompt_tokens + VALUES(prompt_tokens),
+                      completion_tokens = completion_tokens + VALUES(completion_tokens),
+                      total_tokens = total_tokens + VALUES(total_tokens)
+                    """.trimIndent(),
+                    schemaName, model,
+                    usage.promptTokens.toLong(), usage.completionTokens.toLong(), usage.totalTokens.toLong(),
+                )
+            }.onFailure { log.error("토큰 사용 기록 실패 — 상한이 헐거워진다: {}", it.message) }
+        }
 
         val choice = response.choices.firstOrNull() ?: return null
         // "length" 는 출력 상한에 걸려 잘렸다는 뜻이다. 잘린 JSON 은 파싱에 실패하고,
@@ -113,9 +131,6 @@ class OpenAiExtractor(
         val content = choice.message.content.takeIf(String::isNotBlank) ?: return null
         return mapper.readValue(content, type)
     }
-
-    /** 오늘 쓴 토큰. 관리 화면에서 확인용. */
-    fun tokensSpentToday(): Long = spentToday.get()
 
     val dailyBudget: Long get() = dailyTokenBudget
 

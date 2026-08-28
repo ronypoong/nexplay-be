@@ -23,7 +23,11 @@ data class SyncStatus(
     val failedSteps: List<String>,
     val steps: List<StepStatus>,
     val totals: Map<String, Long>,
+    /** 오늘 모델에 쓴 토큰. 얼마나 썼는지 밖에서 볼 수 없으면 통제할 수도 없다. */
+    val llmToday: LlmUsageToday,
 )
+
+data class LlmUsageToday(val calls: Long, val totalTokens: Long, val budget: Long)
 
 /**
  * 수집이 살아 있는지 밖에서 볼 수 있게 한다.
@@ -32,7 +36,11 @@ data class SyncStatus(
  * 모르면, 알아챌 때는 이미 되찾을 수 없는 날들이 지나 있다.
  */
 @Service
-class SyncStatusService(private val jdbc: JdbcTemplate) {
+class SyncStatusService(
+    private val jdbc: JdbcTemplate,
+    @param:org.springframework.beans.factory.annotation.Value("\${nexplay.intelligence.daily-token-budget:200000}")
+    private val llmBudget: Long,
+) {
 
     @Cacheable(CacheConfig.SECTIONS, key = "'sync-status'")
     fun status(): SyncStatus {
@@ -69,6 +77,14 @@ class SyncStatusService(private val jdbc: JdbcTemplate) {
             "promises" to countOf("SELECT COUNT(*) FROM game_promise"),
         )
 
+        val llm = jdbc.query(
+            """
+            SELECT COALESCE(SUM(calls),0) AS calls, COALESCE(SUM(total_tokens),0) AS tokens
+            FROM llm_usage WHERE usage_date = CURRENT_DATE
+            """.trimIndent(),
+        ) { rs, _ -> LlmUsageToday(rs.getLong("calls"), rs.getLong("tokens"), llmBudget) }
+            .firstOrNull() ?: LlmUsageToday(0, 0, llmBudget)
+
         return SyncStatus(
             lastSuccessAt = lastSuccess,
             hoursSinceSuccess = hours,
@@ -77,6 +93,7 @@ class SyncStatusService(private val jdbc: JdbcTemplate) {
             failedSteps = steps.filter { it.status != "SUCCESS" }.map { it.step },
             steps = steps,
             totals = totals,
+            llmToday = llm,
         )
     }
 
