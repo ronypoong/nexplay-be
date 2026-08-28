@@ -31,9 +31,19 @@ class BudgetExhaustedException(budget: Long, spent: Long) :
 class OpenAiExtractor(
     private val jdbc: JdbcTemplate,
     @param:Value("\${nexplay.intelligence.api-key:}") private val apiKey: String,
-    @param:Value("\${nexplay.intelligence.model:gpt-5.4-mini}") val model: String,
+    @param:Value("\${nexplay.intelligence.model:gpt-5.4-nano}") val model: String,
     @param:Value("\${nexplay.intelligence.base-url:https://api.openai.com/v1}") private val baseUrl: String,
-    @param:Value("\${nexplay.intelligence.daily-token-budget:300000}") private val dailyTokenBudget: Long,
+    @param:Value("\${nexplay.intelligence.daily-token-budget:60000}") private val dailyTokenBudget: Long,
+    /**
+     * 분류가 쓸 몫. 나머지는 약속 추출이 쓴다.
+     *
+     * 하나의 예산을 나눠 쓰게 두면 먼저 도는 쪽이 다 먹는다. 스케줄러는 분류를
+     * 먼저 돌리는데 미분류가 1,326건 밀려 있어, 그것만으로 예산이 바닥나고 약속
+     * 추출은 한 건도 못 돌릴 참이었다. 밀린 분류가 없어질 때까지 한 달을 굶는 셈이다.
+     *
+     * 분류는 홈 화면 품질을, 약속은 대조표를 채운다. 둘 다 매일 조금씩 나가야 한다.
+     */
+    @param:Value("\${nexplay.intelligence.event-share:0.6}") private val eventShare: Double,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val mapper: JsonMapper = JsonMapper.builder().addModule(KotlinModule.Builder().build()).build()
@@ -60,7 +70,21 @@ class OpenAiExtractor(
         ) ?: 0L
     }.getOrDefault(0L)
 
-    private fun hasRoom(): Boolean = tokensSpentToday() < dailyTokenBudget
+    private fun tokensSpentToday(purpose: String): Long = runCatching {
+        jdbc.queryForObject(
+            "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage WHERE usage_date = CURRENT_DATE AND purpose = ?",
+            Long::class.java, purpose,
+        ) ?: 0L
+    }.getOrDefault(0L)
+
+    /** 목적별 몫과 전체 상한을 함께 본다. 전체는 폭주 방지선이라 끝까지 유효하다. */
+    private fun budgetFor(purpose: String): Long {
+        val share = if (purpose.startsWith("event")) eventShare else 1.0 - eventShare
+        return (dailyTokenBudget * share.coerceIn(0.1, 0.9)).toLong()
+    }
+
+    private fun hasRoom(purpose: String): Boolean =
+        tokensSpentToday() < dailyTokenBudget && tokensSpentToday(purpose) < budgetFor(purpose)
 
     /**
      * 스키마에 맞춰 한 번 뽑는다.
@@ -79,7 +103,7 @@ class OpenAiExtractor(
         if (!enabled) return null
         // 예산 소진을 null 로 돌려주면 부르는 쪽에서 "약속이 없었다" 와 구분할 수 없다.
         // 실제로 배치 아홉 번이 아무 일도 안 하고 SUCCESS 를 보고한 적이 있다.
-        if (!hasRoom()) throw BudgetExhaustedException(dailyTokenBudget, tokensSpentToday())
+        if (!hasRoom(schemaName)) throw BudgetExhaustedException(budgetFor(schemaName), tokensSpentToday(schemaName))
 
         val body = mapOf(
             "model" to model,

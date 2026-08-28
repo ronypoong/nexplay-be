@@ -101,6 +101,9 @@ nexplay:
     # 이 상한은 DB 에서 읽는다. 메모리 카운터일 때는 배포마다 0 으로 돌아가서,
     # 하루에 열 번 배포하면 상한이 열 번 풀렸다.
     daily-token-budget: ${NEXPLAY_INTELLIGENCE_DAILY_TOKEN_BUDGET:60000}
+    # 분류가 쓸 몫. 나머지는 약속 추출이 쓴다. 하나의 예산을 나눠 쓰게 두면
+    # 먼저 도는 쪽이 다 먹어, 밀린 분류가 없어질 때까지 약속은 한 달을 굶는다.
+    event-share: ${NEXPLAY_INTELLIGENCE_EVENT_SHARE:0.6}
     # 모델에 넣는 본문 길이. 실제 소식으로 재 보니 4,000자를 1,200자로 줄여도
     # 결과가 거의 같았고 입력 토큰은 34% 줄었다. 중요한 사실은 앞에 나온다.
     max-body-chars: ${NEXPLAY_INTELLIGENCE_MAX_BODY_CHARS:1200}
