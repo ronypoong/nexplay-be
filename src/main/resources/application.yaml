@@ -78,6 +78,13 @@ nexplay:
     api-key: ${NEXPLAY_INTELLIGENCE_API_KEY:}
     model: ${NEXPLAY_INTELLIGENCE_MODEL:gpt-5.4-nano}
     base-url: ${NEXPLAY_INTELLIGENCE_BASE_URL:https://api.openai.com/v1}
+    # 100만 토큰당 달러. 2026-08-28 확인한 값이다. OpenAI 가 단가를 바꾸면
+    # 여기만 고치면 된다. 표에 없는 모델은 금액을 추정하지 않는다 —
+    # 모르는 것을 0 으로 적으면 거짓말이 된다.
+    pricing:
+      gpt-5.4-nano: { input: 0.20, output: 1.25 }
+      gpt-5.4-mini: { input: 0.75, output: 4.50 }
+      gpt-5.4: { input: 2.50, output: 15.00 }
     # 아끼려는 상한이 아니라 폭주 방지선이다. 설정 실수나 버그로 호출이
     # 무한정 나가는 걸 막는다. 하루가 바뀌면 저절로 풀린다.
     #

@@ -52,6 +52,7 @@ class CollectorAdminController(
     private val promiseLedgerService: PromiseLedgerService,
     private val readCacheEvictor: ReadCacheEvictor,
     private val rawPayloadBackfill: RawPayloadBackfill,
+    private val llmCostService: com.rubion.nexplaybe.intelligence.LlmCostService,
 ) {
     /** 수집한 뉴스를 모델이 읽고 분류·구조화한다. 키가 없으면 SKIPPED 를 돌려준다. */
     @PostMapping("/events/extract")
@@ -129,6 +130,10 @@ class CollectorAdminController(
     @PostMapping("/catalog/games/{slug}/cover")
     fun setCover(@PathVariable slug: String, @RequestBody request: CoverRequest) =
         catalogSyncService.setCoverImage(slug, request.url)
+
+    /** 모델에 쓴 돈을 날짜별로 어림한다. 추정이며 실제 청구는 OpenAI 대시보드가 기준이다. */
+    @GetMapping("/llm-cost")
+    fun llmCost(@RequestParam(defaultValue = "14") days: Int) = llmCostService.summary(days)
 
     @GetMapping("/collectors/runs")
     fun recentRuns() = steamNewsCollector.recentRuns().map(CollectorRun::toResponse)
