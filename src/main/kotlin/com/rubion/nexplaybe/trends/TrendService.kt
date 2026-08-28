@@ -60,8 +60,23 @@ class TrendService(private val jdbc: JdbcTemplate) {
         val snapshotDays = jdbc.queryForObject(
             "SELECT COUNT(DISTINCT snapshot_date) FROM popularity_snapshot", Int::class.java,
         ) ?: 0
+        /*
+         * 연기 기록은 두 곳에서 나온다.
+         *
+         * release_revision 은 Wikidata 의 날짜가 바뀔 때 쌓이는데, 670건이 전부
+         * INITIAL_CONFIRMATION 이고 실제 변경은 0건이다. 위키데이터는 출시일이
+         * 확정된 뒤에나 갱신되기 때문에 "밀렸다" 는 사실이 거기 남지 않는다.
+         *
+         * 진짜 연기는 게임사가 스스로 말한다 — "2025 에 낸다" 고 했다가 나중에
+         * "2026 가을" 이라고 하는 식이다. 그게 약속 대조표에 그대로 있다.
+         */
         val changeCount = jdbc.queryForObject(
-            "SELECT COUNT(*) FROM release_revision WHERE change_type <> 'INITIAL_CONFIRMATION'", Int::class.java,
+            """
+            SELECT (SELECT COUNT(*) FROM release_revision WHERE change_type <> 'INITIAL_CONFIRMATION')
+                 + (SELECT COUNT(*) FROM game_promise p JOIN game_promise_resolution r ON r.promise_id = p.id
+                    WHERE p.claim_type = 'RELEASE_DATE' AND p.provenance = 'LIVE'
+                      AND r.status = 'SUPERSEDED' AND r.slip_days > 0)
+            """.trimIndent(), Int::class.java,
         ) ?: 0
 
         val rising = if (snapshotDays < MIN_SNAPSHOT_DAYS) emptyList() else jdbc.query(
@@ -84,19 +99,25 @@ class TrendService(private val jdbc: JdbcTemplate) {
 
         val changes = jdbc.query(
             """
-            SELECT g.slug, g.title, r.platform, r.previous_date, r.new_date, r.change_type, r.announced_at
-            FROM release_revision r JOIN game g ON g.id = r.game_id
-            WHERE r.change_type <> 'INITIAL_CONFIRMATION' AND r.previous_date IS NOT NULL AND r.new_date IS NOT NULL
-            ORDER BY r.announced_at DESC, r.id DESC
+            SELECT g.slug, g.title, p.claimed_value AS prev_label, r.actual_value AS next_label,
+                   r.slip_days, p.announced_at
+            FROM game_promise p
+            JOIN game_promise_resolution r ON r.promise_id = p.id
+            JOIN game g ON g.id = p.game_id
+            WHERE p.claim_type = 'RELEASE_DATE' AND p.provenance = 'LIVE'
+              AND r.status = 'SUPERSEDED' AND r.slip_days > 0
+              AND r.actual_value IS NOT NULL
+            ORDER BY p.announced_at DESC, r.slip_days DESC
             LIMIT 20
             """.trimIndent(),
         ) { rs, _ ->
-            val prev = rs.getDate("previous_date").toLocalDate()
-            val next = rs.getDate("new_date").toLocalDate()
             DelayEntry(
-                rs.getString("slug"), rs.getString("title"), rs.getString("platform"),
-                prev.toString(), next.toString(), rs.getString("change_type"),
-                java.time.temporal.ChronoUnit.DAYS.between(prev, next).toInt(),
+                rs.getString("slug"), rs.getString("title"),
+                // 근거가 무엇인지 화면에 그대로 적는다. 추정한 날짜가 아니라
+                // 게임사가 공식 발표에서 한 말이다.
+                "공식 발표",
+                rs.getString("prev_label"), rs.getString("next_label"),
+                "DELAY", rs.getInt("slip_days"),
                 rs.getDate("announced_at").toLocalDate().toString(),
             )
         }
@@ -104,15 +125,17 @@ class TrendService(private val jdbc: JdbcTemplate) {
         val studios = jdbc.query(
             """
             SELECT c.name AS studio,
-                   COUNT(DISTINCT r.game_id) AS tracked,
-                   SUM(r.change_type = 'DELAY') AS delays,
-                   AVG(DATEDIFF(r.new_date, r.previous_date)) AS avg_shift
-            FROM release_revision r
-            JOIN game g ON g.id = r.game_id
-            JOIN company c ON c.id = g.developer_id
-            WHERE r.change_type <> 'INITIAL_CONFIRMATION' AND r.previous_date IS NOT NULL AND r.new_date IS NOT NULL
+                   COUNT(DISTINCT p.game_id) AS tracked,
+                   SUM(r.status = 'SUPERSEDED') AS delays,
+                   AVG(CASE WHEN r.slip_days > 0 THEN r.slip_days END) AS avg_shift
+            FROM game_promise p
+            JOIN game_promise_resolution r ON r.promise_id = p.id
+            JOIN game g ON g.id = p.game_id
+            JOIN company c ON c.id = g.publisher_id
+            WHERE p.claim_type = 'RELEASE_DATE' AND p.provenance = 'LIVE'
             GROUP BY c.name
-            HAVING COUNT(DISTINCT r.game_id) >= 1
+            -- 약속 한두 건으로 스튜디오를 평가하면 그 표가 거짓말이 된다.
+            HAVING COUNT(*) >= 3 AND delays > 0
             ORDER BY delays DESC, tracked DESC
             LIMIT 12
             """.trimIndent(),
