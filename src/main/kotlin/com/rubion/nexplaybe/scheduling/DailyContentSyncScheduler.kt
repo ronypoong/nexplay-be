@@ -1,5 +1,7 @@
 package com.rubion.nexplaybe.scheduling
 
+import com.rubion.nexplaybe.awards.AwardSyncSummary
+import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.catalog.CatalogSyncService
 import com.rubion.nexplaybe.collector.SteamNewsCollector
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
@@ -22,6 +24,7 @@ class DailyContentSyncScheduler(
     private val steamNewsCollector: SteamNewsCollector,
     private val richMetadataIngestionService: RichMetadataIngestionService,
     private val wikipediaDescriptionService: WikipediaDescriptionService,
+    private val gameAwardService: GameAwardService,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -45,15 +48,17 @@ class DailyContentSyncScheduler(
         val snapshots = step("popularity-snapshot", 0) { richMetadataIngestionService.snapshotPopularity() }
         val relations = step("wikidata-relations", RichMetadataSyncSummary("FAILED", 0, 0, 0)) { richMetadataIngestionService.enrichWikidataRelations() }
         val wiki = step("wikipedia-descriptions", WikipediaSyncSummary("FAILED", 0, 0, 0)) { wikipediaDescriptionService.enrichDescriptions() }
+        val awards = step("game-awards", AwardSyncSummary("FAILED", 0, 0, 0)) { gameAwardService.sync() }
         val news = step("steam-news", CollectorSummary("FAILED", 0, 0, 0, 0, emptyList())) { steamNewsCollector.collect() }
         log.info(
-            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, errors={}",
+            "NEXPLAY daily content sync finished: catalogStatuses={}, insertedGames={}, refreshedStatuses={}, enrichedGames={}, extendedMetadata={}, wikipediaDescriptions={}, awards={}, relations={}, snapshots={}, newsStatus={}, newEvents={}, errors={}",
             catalogs.joinToString { "${it.year}:${it.status}" },
             catalogs.sumOf { it.inserted },
             refreshed,
             enrichment.enriched,
             extended.enriched,
             wiki.filled,
+            awards.stored,
             relations.enriched,
             snapshots,
             news.status,

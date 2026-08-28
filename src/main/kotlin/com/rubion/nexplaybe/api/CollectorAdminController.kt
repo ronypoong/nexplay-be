@@ -6,6 +6,7 @@ import com.rubion.nexplaybe.collector.SteamNewsCollector
 import com.rubion.nexplaybe.editorial.EditorPickRequest
 import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.catalog.CatalogSyncService
+import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.catalog.ManualGameRequest
 import com.rubion.nexplaybe.metadata.RichMetadataIngestionService
 import com.rubion.nexplaybe.source.Source
@@ -42,7 +43,11 @@ class CollectorAdminController(
     private val subscriptionRepository: SourceSubscriptionRepository,
     private val editorPickService: EditorPickService,
     private val wikipediaDescriptionService: WikipediaDescriptionService,
+    private val gameAwardService: GameAwardService,
 ) {
+    @PostMapping("/awards/sync")
+    fun syncAwards() = gameAwardService.sync()
+
     /** Steam 이 못 채운 소개를 위키백과로 메운다. */
     @PostMapping("/catalog/wikipedia/descriptions")
     fun enrichWikipediaDescriptions(@RequestParam(defaultValue = "200") limit: Int) =

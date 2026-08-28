@@ -77,6 +77,9 @@ class Game(
     val symbol: String,
     @Column(nullable = false)
     val featured: Boolean = false,
+    // GOTY 아카이브로 들어온 과거 수상작. 신작 화면(홈·디스커버·캘린더)에는 나오지 않는다.
+    @Column(name = "archive_only", nullable = false)
+    val archiveOnly: Boolean = false,
     @ElementCollection(fetch = FetchType.LAZY)
     @jakarta.persistence.CollectionTable(name = "game_genre", joinColumns = [JoinColumn(name = "game_id")])
     @Column(name = "genre", nullable = false, length = 60)

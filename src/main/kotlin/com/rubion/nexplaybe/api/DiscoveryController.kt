@@ -4,6 +4,7 @@ import com.rubion.nexplaybe.discovery.DiscoveryService
 import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.korean.KoreanSupportService
 import com.rubion.nexplaybe.metadata.ExtendedGameMetadataService
+import com.rubion.nexplaybe.awards.GameAwardService
 import com.rubion.nexplaybe.trends.TrendService
 import jakarta.validation.constraints.Size
 import org.springframework.format.annotation.DateTimeFormat
@@ -22,7 +23,12 @@ class DiscoveryController(
     private val editorPickService: EditorPickService,
     private val koreanSupportService: KoreanSupportService,
     private val trendService: TrendService,
+    private val gameAwardService: GameAwardService,
 ) {
+    /** GOTY 수상·후보 아카이브와, 이력에 근거한 올해 관측 대상. */
+    @GetMapping("/goty")
+    fun goty() = gameAwardService.goty()
+
     /** 시간이 쌓여야 보이는 것: 기대 지수 급상승과 출시일 변경 이력. */
     @GetMapping("/trends")
     fun trends() = trendService.trends()
