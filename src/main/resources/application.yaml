@@ -80,7 +80,11 @@ nexplay:
     base-url: ${NEXPLAY_INTELLIGENCE_BASE_URL:https://api.openai.com/v1}
     # 아끼려는 상한이 아니라 폭주 방지선이다. 설정 실수나 버그로 호출이
     # 무한정 나가는 걸 막는다. 하루가 바뀌면 저절로 풀린다.
-    daily-token-budget: ${NEXPLAY_INTELLIGENCE_DAILY_TOKEN_BUDGET:300000}
+    #
+    # 30만 -> 100만. 지켜보는 게임이 9배가 되면서 미분류가 3,222건 쌓였고,
+    # 30만이면 하루 170건씩이라 따라잡는 데 3주가 걸린다. 중요도 순으로 돌리므로
+    # 홈에 보이는 것부터 채워지고, 패치노트는 뒤에서 천천히 메워진다.
+    daily-token-budget: ${NEXPLAY_INTELLIGENCE_DAILY_TOKEN_BUDGET:1000000}
   archive:
     # 수집 원문 보관 기간. 시간이 지날수록 값이 오르는 자산이라 길게 잡는다.
     raw-retention-days: ${NEXPLAY_RAW_RETENTION_DAYS:3650}

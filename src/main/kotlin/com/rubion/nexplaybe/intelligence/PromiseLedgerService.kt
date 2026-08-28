@@ -42,8 +42,18 @@ class PromiseLedgerService(
             WHERE NOT EXISTS (
                 SELECT 1 FROM game_promise_scan sc WHERE sc.event_id = e.id AND sc.prompt_version = ?
             )
-            GROUP BY e.id, e.game_id, e.title, r.raw_payload, e.summary, e.event_date, g.title
-            ORDER BY e.published_at DESC
+            GROUP BY e.id, e.game_id, e.title, r.raw_payload, e.summary, e.event_date, g.title, e.type, g.discovery_score
+            -- 약속은 출시일·콘텐츠 발표에 있지 패치노트에 있지 않다. 분류와 같은
+            -- 순서로 돌아야 같은 예산에서 나오는 약속이 많아진다.
+            ORDER BY (
+                CASE e.type
+                    WHEN 'RELEASE_DATE' THEN 100 WHEN 'DELAY' THEN 100 WHEN 'RELEASE' THEN 90
+                    WHEN 'EXPANSION' THEN 85 WHEN 'DLC' THEN 80 WHEN 'DEMO' THEN 70
+                    WHEN 'ANNOUNCEMENT' THEN 60 WHEN 'TRAILER' THEN 45 WHEN 'PATCH' THEN 12 ELSE 40
+                END
+                + g.discovery_score / 5
+                - LEAST(GREATEST(DATEDIFF(CURRENT_DATE, e.event_date), 0), 90) / 3
+            ) DESC, e.published_at DESC
             LIMIT ${limit.coerceIn(1, MAX_LIMIT)}
             """.trimIndent(),
             { rs, _ ->

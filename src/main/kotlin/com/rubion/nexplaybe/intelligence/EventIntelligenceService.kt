@@ -47,8 +47,24 @@ class EventIntelligenceService(
                 SELECT 1 FROM game_event_extraction x
                 WHERE x.event_id = e.id AND x.prompt_version = ?
             )
-            GROUP BY e.id, e.title, body, g.title
-            ORDER BY e.published_at DESC
+            GROUP BY e.id, e.title, body, g.title, e.type, e.event_date, g.discovery_score
+            -- 홈이 실제로 쓰는 순서대로 분류한다.
+            --
+            -- 예전에는 최신순이었다. 그러면 매일 쏟아지는 패치노트가 먼저 분류되고,
+            -- 정작 홈에 올라갈 출시 발표는 뒤로 밀린다. 미분류가 3,222건이고 그중
+            -- 1,183건이 패치노트라, 최신순으로 돌리면 같은 돈을 쓰고도 화면은
+            -- 그대로다.
+            ORDER BY (
+                CASE e.type
+                    WHEN 'RELEASE_DATE' THEN 100 WHEN 'DELAY' THEN 100 WHEN 'RELEASE' THEN 95
+                    WHEN 'EXPANSION' THEN 80 WHEN 'DLC' THEN 75 WHEN 'DEMO' THEN 72
+                    WHEN 'TRAILER' THEN 70 WHEN 'GAMEPLAY' THEN 70 WHEN 'BETA' THEN 64
+                    WHEN 'PREORDER' THEN 60 WHEN 'DISCOUNT' THEN 56 WHEN 'MAJOR_UPDATE' THEN 52
+                    WHEN 'ANNOUNCEMENT' THEN 44 WHEN 'PATCH' THEN 16 ELSE 40
+                END
+                + g.discovery_score / 5
+                - LEAST(GREATEST(DATEDIFF(CURRENT_DATE, e.event_date), 0), 60) / 2
+            ) DESC, e.published_at DESC
             LIMIT ${limit.coerceIn(1, MAX_LIMIT)}
             """.trimIndent(),
             { rs, _ -> Candidate(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)) },
