@@ -101,7 +101,10 @@ class RichMetadataIngestionService(
          * 것일 수 있고, 그걸 자동 수집이 밀어내면 안 된다.
          */
         if (game.coverImageUrl.isNullOrBlank() && data.headerImageUrl.isNotBlank()) {
-            jdbc.update("UPDATE game SET cover_image_url = ? WHERE id = ?", data.headerImageUrl, game.id)
+            // 엔티티로 고친다. 같은 트랜잭션에서 이 엔티티의 다른 필드도 바꾸므로,
+            // raw SQL 로 쓰면 Hibernate 가 flush 하면서 옛 값으로 되돌린다.
+            game.coverImageUrl = data.headerImageUrl
+            gameRepository.save(game)
             jdbc.update(
                 """INSERT INTO game_data_provenance (game_id,field_name,source_name,source_url,confidence,verified_at)
                 VALUES (?,'cover_image','Steam Store',?,'HIGH',?) ON DUPLICATE KEY UPDATE verified_at=VALUES(verified_at)""",

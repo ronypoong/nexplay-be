@@ -51,7 +51,11 @@ class Game(
     @Column(name = "catalog_source", nullable = false, length = 40)
     val catalogSource: String = "MANUAL",
     @Column(name = "cover_image_url", length = 1000)
-    val coverImageUrl: String? = null,
+    /**
+     * 대표 이미지. Steam 확장 수집이 나중에 채울 수 있어야 해서 var 다.
+     * val 이면 같은 트랜잭션에서 엔티티를 고칠 때 Hibernate 가 옛 값으로 되돌린다.
+     */
+    var coverImageUrl: String? = null,
     @Column(name = "image_source", length = 40)
     val imageSource: String? = null,
     @Column(name = "korean_text_supported")
