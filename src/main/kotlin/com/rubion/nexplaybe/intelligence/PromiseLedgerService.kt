@@ -23,6 +23,7 @@ class PromiseLedgerService(
     private val jdbc: JdbcTemplate,
     private val transactions: TransactionTemplate,
     private val extractor: OpenAiExtractor,
+    @param:Value("\${nexplay.intelligence.max-body-chars:1200}") private val maxBodyChars: Int,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val model: String get() = extractor.model
@@ -105,7 +106,7 @@ class PromiseLedgerService(
     }
 
     private fun extract(candidate: Candidate): PromiseExtraction? {
-        val body = (candidate.rawPayload ?: candidate.summary).orEmpty().take(4_000)
+        val body = (candidate.rawPayload ?: candidate.summary).orEmpty().take(maxBodyChars)
         return extractor.extract(
             schemaName = "promise_extraction",
             schema = PROMISE_SCHEMA,

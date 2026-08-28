@@ -27,6 +27,7 @@ class EventIntelligenceService(
     private val jdbc: JdbcTemplate,
     private val transactions: TransactionTemplate,
     private val extractor: OpenAiExtractor,
+    @param:Value("\${nexplay.intelligence.max-body-chars:1200}") private val maxBodyChars: Int,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val model: String get() = extractor.model
@@ -47,6 +48,9 @@ class EventIntelligenceService(
                 SELECT 1 FROM game_event_extraction x
                 WHERE x.event_id = e.id AND x.prompt_version = ?
             )
+              -- 패치노트가 전체의 36% 다. 대부분 "1.2.3 이 배포됐다" 라 한국어 요약을
+              -- 얻어도 값이 작고, 홈에서도 맨 뒤로 밀린다. 눈여겨보는 게임의 패치만 묻는다.
+              AND NOT (e.type = 'PATCH' AND g.discovery_score < ?)
             GROUP BY e.id, e.title, body, g.title, e.type, e.event_date, g.discovery_score
             -- 홈이 실제로 쓰는 순서대로 분류한다.
             --
@@ -68,7 +72,7 @@ class EventIntelligenceService(
             LIMIT ${limit.coerceIn(1, MAX_LIMIT)}
             """.trimIndent(),
             { rs, _ -> Candidate(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)) },
-            PROMPT_VERSION,
+            PROMPT_VERSION, PATCH_MIN_SCORE,
         )
         if (candidates.isEmpty()) return ExtractionSummary("SUCCESS", 0, 0, 0)
 
@@ -109,7 +113,7 @@ class EventIntelligenceService(
             게임: ${candidate.gameTitle}
             제목: ${candidate.title}
             본문:
-            ${candidate.body.orEmpty().take(4_000)}
+            ${candidate.body.orEmpty().take(maxBodyChars)}
         """.trimIndent(),
         maxOutputTokens = 800,
         type = EventExtraction::class.java,
@@ -142,6 +146,8 @@ class EventIntelligenceService(
         const val FAILURE_CUTOFF = 5
         // 프롬프트를 바꾸면 올린다. 판본이 다르면 같은 이벤트를 다시 분류해 비교할 수 있다.
         const val PROMPT_VERSION = 1
+        /** 이 점수 미만인 게임의 패치노트는 묻지 않는다. */
+        const val PATCH_MIN_SCORE = 90
 
         /**
          * strict 모드 스키마. 속성이 전부 required 여야 하므로, 값이 없을 수 있는 자리는
@@ -156,7 +162,7 @@ class EventIntelligenceService(
             "confidence" to Schemas.enumOf("판단 확신도", "HIGH", "MEDIUM", "LOW"),
             "summaryKo" to Schemas.nullableStr("한국어 한 줄 요약. 원문에 있는 사실만 쓴다. 최대 120자"),
             "discountPercent" to Schemas.nullableInt("할인율(%). 원문에 명시된 숫자만. 없으면 null"),
-            "mentionedReleaseDate" to Schemas.nullableStr("원문이 언급한 출시일(YYYY-MM-DD). 명시되지 않았으면 null"),
+            "mentionedReleaseDate" to Schemas.nullableStr("원문이 언급한 출시일. YYYY-MM-DD 형식만 쓴다. 그 형식으로 못 적으면 null"),
             "hasDemo" to Schemas.bool("체험판/데모 배포를 알리는 글이면 true"),
             "isMarketingNoise" to Schemas.bool("게임 내용과 무관한 마케팅·커뮤니티 잡음이면 true"),
             "reason" to Schemas.nullableStr("그렇게 분류한 근거를 원문 표현을 인용해 한 문장으로. 최대 200자"),

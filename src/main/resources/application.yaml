@@ -76,17 +76,20 @@ nexplay:
     # 뉴스 분류·추출용 API 키. 비우면 기능 전체가 꺼진다.
     # 조용히 엉뚱한 값을 쓰느니 아무것도 안 하는 편이 낫다.
     api-key: ${NEXPLAY_INTELLIGENCE_API_KEY:}
-    model: ${NEXPLAY_INTELLIGENCE_MODEL:gpt-5.4-mini}
+    model: ${NEXPLAY_INTELLIGENCE_MODEL:gpt-5.4-nano}
     base-url: ${NEXPLAY_INTELLIGENCE_BASE_URL:https://api.openai.com/v1}
     # 아끼려는 상한이 아니라 폭주 방지선이다. 설정 실수나 버그로 호출이
     # 무한정 나가는 걸 막는다. 하루가 바뀌면 저절로 풀린다.
     #
-    # 따라잡기가 끝나 100만에서 20만으로 내린다. 남은 미분류는 대부분 패치노트라
-    # 급하지 않고, 새로 들어오는 소식은 하루 수십 건이라 20만이면 넉넉하다.
+    # 실제 소식 8건으로 재 보니 nano 기준 1건당 약 780토큰이다. 8만이면 하루
+    # 100건 남짓인데, 새로 들어오는 소식이 하루 수십 건이라 이걸로 충분하다.
     #
-    # 이 상한은 이제 DB 에서 읽는다. 메모리 카운터일 때는 배포마다 0 으로
-    # 돌아가서, 하루에 열 번 배포하면 상한이 열 번 풀렸다.
-    daily-token-budget: ${NEXPLAY_INTELLIGENCE_DAILY_TOKEN_BUDGET:200000}
+    # 이 상한은 DB 에서 읽는다. 메모리 카운터일 때는 배포마다 0 으로 돌아가서,
+    # 하루에 열 번 배포하면 상한이 열 번 풀렸다.
+    daily-token-budget: ${NEXPLAY_INTELLIGENCE_DAILY_TOKEN_BUDGET:80000}
+    # 모델에 넣는 본문 길이. 실제 소식으로 재 보니 4,000자를 1,200자로 줄여도
+    # 결과가 거의 같았고 입력 토큰은 34% 줄었다. 중요한 사실은 앞에 나온다.
+    max-body-chars: ${NEXPLAY_INTELLIGENCE_MAX_BODY_CHARS:1200}
   archive:
     # 수집 원문 보관 기간. 시간이 지날수록 값이 오르는 자산이라 길게 잡는다.
     raw-retention-days: ${NEXPLAY_RAW_RETENTION_DAYS:3650}
