@@ -40,10 +40,24 @@ class WikidataCatalogClient(
     private val httpClient = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val objectMapper = jacksonObjectMapper()
 
-    fun fetchReleaseYear(year: Int): List<CatalogGameItem> = listOf(1, 4, 7, 10)
+    /**
+     * 한 해를 달 단위로 나눠 받는다.
+     *
+     * 분기로 나눠 받고 있었는데 1분기가 상한(500행)에 걸려 3월 13일에서 잘렸다.
+     * 그 뒤에 나오는 게임은 통째로 안 보인다 — 붉은사막(3월 19일)이 딱 그 선
+     * 너머에 있었다.
+     *
+     * 달로 나누면 한 창이 작아져 상한에 닿지 않는다. 요청 수는 네 배가 되지만
+     * Wikidata 는 무료이고, 못 가져온 게임은 어디서도 메울 수 없다.
+     *
+     * 상한에 닿으면 그 달은 잘린 것이므로 기록을 남긴다. 조용히 잘리는 것이
+     * 이 일에서 가장 나쁘다.
+     */
+    fun fetchReleaseYear(year: Int): List<CatalogGameItem> = (1..12)
         .flatMap { month ->
+            if (month > 1) runCatching { Thread.sleep(RANGE_REQUEST_INTERVAL_MS) }
             val start = LocalDate.of(year, month, 1)
-            fetchRange(start, start.plusMonths(3))
+            fetchRange(start, start.plusMonths(1))
         }
         .distinctBy { it.wikidataId }
         .distinctBy { it.steamAppId?.let { id -> "steam:$id" } ?: "wikidata:${it.wikidataId}" }
@@ -294,6 +308,8 @@ class WikidataCatalogClient(
     }
 
     private companion object {
+        /** 한 해에 열두 번 부르므로 간격을 둔다. Wikidata 는 무료지만 예의는 지킨다. */
+        const val RANGE_REQUEST_INTERVAL_MS = 400L
         const val CLASSIFICATION_REQUEST_INTERVAL_MS = 1_000L
         const val CLASSIFICATION_RETRY_BASE_MS = 3_000L
         const val CLASSIFICATION_MAX_ATTEMPTS = 3

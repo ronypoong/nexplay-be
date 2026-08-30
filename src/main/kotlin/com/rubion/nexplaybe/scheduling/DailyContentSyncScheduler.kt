@@ -54,7 +54,9 @@ class DailyContentSyncScheduler(
         log.info("NEXPLAY daily content sync started")
         val year = LocalDate.now(ZoneId.of(zone)).year
         // 각 단계를 격리한다. 예전에는 중간 단계가 던지면 마지막의 뉴스 수집이 그날 통째로 실행되지 않았다.
-        val catalogs = (year..year + 1).map { step("catalog-$it", CatalogSyncSummary("FAILED", it, 0, 0, 0)) { catalogSyncService.sync(it) } }
+        // 올해와 앞으로 두 해를 본다. 대작은 보통 2~3년 뒤로 발표된다 —
+        // 한 해만 앞을 보면 그 발표들이 카탈로그에 영영 안 들어온다.
+        val catalogs = (year..year + 2).map { step("catalog-$it", CatalogSyncSummary("FAILED", it, 0, 0, 0)) { catalogSyncService.sync(it) } }
         val refreshed = step("release-status-refresh", 0) { catalogSyncService.refreshReleaseStatuses() }
         val enrichment = step("wikidata-classifications", ClassificationEnrichmentSummary("FAILED", 0, 0, 0)) { catalogSyncService.enrichWikidataClassifications() }
         val extended = step("steam-extended", RichMetadataSyncSummary("FAILED", 0, 0, 0)) { richMetadataIngestionService.enrichFromSteam() }
