@@ -196,7 +196,11 @@ class CatalogSyncService(
         val enriched = linkedMapOf<String, CatalogGameItem>()
         var budget = MAX_STEAM_DETAILS_PER_SYNC
         var consecutiveFailures = 0
-        for (item in items) {
+        // 예산이 모자랄 때 누구를 먼저 물어볼지가 중요하다. 개발사도 배급사도 모르는
+        // 게임은 스토어가 안 알려주면 영영 "Independent / Unknown" 으로 남는다.
+        // 이미 다 아는 게임보다 그쪽이 급하다.
+        val ordered = items.sortedBy { it.developers.isNotEmpty() || it.publishers.isNotEmpty() }
+        for (item in ordered) {
             if (budget <= 0 || consecutiveFailures >= STEAM_FAILURE_CUTOFF) break
             val appId = item.steamAppId ?: continue
             budget--
@@ -218,6 +222,10 @@ class CatalogSyncService(
         genres = metadata.genres,
         platforms = metadata.platforms,
         gameModes = metadata.gameModes,
+        // Wikidata 가 알면 그쪽을 쓴다. Q번호가 붙어 있어 나중에 같은 회사끼리 묶기 좋다.
+        // 비어 있을 때만 스토어가 적어둔 이름을 가져온다.
+        developers = item.developers.ifEmpty { metadata.developers.map { CatalogCompanyRef(null, it) } },
+        publishers = item.publishers.ifEmpty { metadata.publishers.map { CatalogCompanyRef(null, it) } },
     ).also {
         storeCopy[item.wikidataId] = metadata.aboutTheGame to metadata.shortDescription
     }
@@ -234,7 +242,9 @@ class CatalogSyncService(
                     game.platforms.isEmpty() || game.platforms.all { it == "미정" } || game.gameModes.isEmpty() ||
                     // 표지가 없는 것도 채워야 할 대상이다. 예전에는 장르·플랫폼만 보고
                     // 골랐던 탓에, 장르는 멀쩡한데 카드가 빈 게임이 계속 남아 있었다.
-                    game.coverImageUrl.isNullOrBlank()
+                    game.coverImageUrl.isNullOrBlank() ||
+                    // 만든 곳을 모르는 게임도 마찬가지다. 스토어는 대개 알고 있다.
+                    game.developer.slug == UNKNOWN_COMPANY_SLUG || game.publisher.slug == UNKNOWN_COMPANY_SLUG
             }
             .take(limit.coerceIn(1, 2_000))
             .toList()
@@ -272,6 +282,18 @@ class CatalogSyncService(
             if (game.coverImageUrl.isNullOrBlank()) {
                 game.coverImageUrl = metadata.headerImageUrl
                 game.imageSource = "STEAM_STOREFRONT_API"
+            }
+            // 아는 것을 모른다고 남겨두지 않는다. 다만 이미 이름이 붙어 있으면
+            // 스토어 표기로 덮어쓰지 않는다 — Wikidata 쪽이 Q번호를 달고 있어 더 낫다.
+            if (game.developer.slug == UNKNOWN_COMPANY_SLUG) {
+                metadata.developers.firstOrNull()?.let {
+                    game.developer = resolveCompany(CatalogCompanyRef(null, it), CompanyType.DEVELOPER).first
+                }
+            }
+            if (game.publisher.slug == UNKNOWN_COMPANY_SLUG) {
+                metadata.publishers.firstOrNull()?.let {
+                    game.publisher = resolveCompany(CatalogCompanyRef(null, it), CompanyType.PUBLISHER).first
+                }
             }
             applyStoreCopy(game, metadata)
             gameRepository.save(game)
@@ -524,7 +546,7 @@ class CatalogSyncService(
     }
 
     private fun resolveCompany(ref: CatalogCompanyRef?, type: CompanyType): Pair<Company, Int> {
-        if (ref == null) return Pair(requireNotNull(companyRepository.findBySlug("independent-unknown")), 0)
+        if (ref == null) return Pair(requireNotNull(companyRepository.findBySlug(UNKNOWN_COMPANY_SLUG)), 0)
         ref.wikidataId?.let { companyRepository.findByWikidataId(it) }?.let { return Pair(it, 0) }
         companyRepository.findByNameIgnoreCase(ref.name)?.let { return Pair(it, 0) }
         var slug = slugify(ref.name)
@@ -635,7 +657,8 @@ class CatalogSyncService(
 
     private companion object {
         val FEATURED_APP_IDS = setOf(3764200L, 3357650L, 2483190L, 2362060L, 2499860L, 2288340L)
-        const val MAX_STEAM_DETAILS_PER_SYNC = 24
+        const val MAX_STEAM_DETAILS_PER_SYNC = 80
+        const val UNKNOWN_COMPANY_SLUG = "independent-unknown"
         const val STEAM_FAILURE_CUTOFF = 5
         val BOILERPLATE_MARKERS = listOf(
             "Wikidata CC0 구조화 데이터에서 확인한", "에서 확인한 정보입니다",

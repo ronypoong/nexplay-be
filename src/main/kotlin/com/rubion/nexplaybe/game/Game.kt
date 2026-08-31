@@ -36,10 +36,12 @@ class Game(
     var description: String,
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "developer_id", nullable = false)
-    val developer: Company,
+    // 발표 직후에는 Wikidata 가 개발사를 모르는 일이 흔하다. 나중에 스토어가
+    // 알려주면 고쳐 넣어야 하므로 var 다.
+    var developer: Company,
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "publisher_id", nullable = false)
-    val publisher: Company,
+    var publisher: Company,
     @Column(name = "release_date")
     val releaseDate: LocalDate?,
     @Column(name = "official_url", length = 500)

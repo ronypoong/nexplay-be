@@ -18,6 +18,12 @@ data class SteamStoreMetadata(
     val aboutTheGame: String? = null,
     val genres: Set<String>,
     val platforms: Set<String>,
+    /**
+     * Wikidata 는 갓 발표된 게임의 P178·P123 을 비워두는 일이 잦다. 귀무자 Way of the
+     * Sword 가 그랬다 — 캡콤 신작인데 개발사 칸이 비어 있었다. Steam 은 알고 있다.
+     */
+    val developers: List<String> = emptyList(),
+    val publishers: List<String> = emptyList(),
     val gameModes: Set<String> = emptySet(),
     val languages: List<SteamLanguageSupport> = emptyList(),
     val media: List<SteamMediaItem> = emptyList(),
@@ -101,6 +107,8 @@ class SteamStoreClient(
             SteamPrice(it.path("currency").asText(), it.path("initial").asLong(), it.path("final").asLong(), it.path("discount_percent").asInt())
         }
         val reviewCount = data.path("recommendations").path("total").asLong(0).takeIf { it > 0 }
+        val developers = data.path("developers").mapNotNull { it.asText().trim().takeIf(String::isNotBlank) }
+        val publishers = data.path("publishers").mapNotNull { it.asText().trim().takeIf(String::isNotBlank) }
         val ratings = data.path("ratings").fields().asSequence().mapNotNull { (system, node) ->
             node.path("rating").asText().takeIf(String::isNotBlank)?.let { SteamAgeRating(system.uppercase(), it, node.path("descriptors").asText().takeIf(String::isNotBlank)) }
         }.toList()
@@ -109,7 +117,8 @@ class SteamStoreClient(
             .toCollection(linkedSetOf())
         val dlcIds = data.path("dlc").mapNotNull { it.asLong().takeIf { value -> value > 0 } }.toSet()
         return SteamStoreMetadata(
-            name, image, shortDescription, aboutTheGame, genres, platforms, modes, languages, screenshots + movies,
+            name, image, shortDescription, aboutTheGame, genres, platforms, developers, publishers,
+            modes, languages, screenshots + movies,
             requirements.path("minimum").asText().takeIf(String::isNotBlank),
             requirements.path("recommended").asText().takeIf(String::isNotBlank),
             price, ratings, accessibility, dlcIds, reviewCount,

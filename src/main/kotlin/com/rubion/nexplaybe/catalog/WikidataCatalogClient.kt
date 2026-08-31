@@ -247,9 +247,13 @@ class WikidataCatalogClient(
             // 닌텐도 독점작이 통째로 빠졌다 — 2026~2027년만 61개. 유튜브에 도배되는 대작이
             // 정작 우리 목록에 없던 이유가 이것이다.
             //
-            // 개발사나 배급사 이름은 계속 요구한다. 그것도 없는 항목은 아직 게임이라기보다
-            // 만들다 만 위키 문서에 가깝다.
-            .filter { it.developers.isNotEmpty() || it.publishers.isNotEmpty() }
+            // 개발사도 배급사도 스팀 페이지도 없는 항목만 버린다.
+            //
+            // 예전에는 개발사·배급사를 무조건 요구했는데, Wikidata 는 갓 발표된 게임의
+            // P178·P123 을 자주 비워둔다. 귀무자 Way of the Sword 가 그랬다 — 캡콤 신작이고
+            // 스팀 페이지도 있는데 개발사 칸이 비었다는 이유로 버려졌다.
+            // 스팀 ID 가 있으면 스토어가 개발사와 배급사를 알려주므로, 받아두고 나중에 채운다.
+            .filter { it.steamAppId != null || it.developers.isNotEmpty() || it.publishers.isNotEmpty() }
     }
 
     private fun addCompany(
