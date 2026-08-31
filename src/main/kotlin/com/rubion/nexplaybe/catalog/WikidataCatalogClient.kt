@@ -55,18 +55,29 @@ class WikidataCatalogClient(
      * 상한에 닿으면 그 달은 잘린 것이므로 기록을 남긴다. 조용히 잘리는 것이
      * 이 일에서 가장 나쁘다.
      */
-    fun fetchReleaseYear(year: Int): List<CatalogGameItem> = (1..12)
-        .flatMap { month ->
-            if (month > 1) runCatching { Thread.sleep(RANGE_REQUEST_INTERVAL_MS) }
-            val start = LocalDate.of(year, month, 1)
-            // 한 달이 실패해도 나머지 열한 달은 살린다. 예전에는 6월 한 번의 502 로
-            // 그 해 전체가 날아갔다 — 스케줄러 단계를 격리한 것과 같은 이유다.
-            runCatching { fetchRange(start, start.plusMonths(1)) }
-                .onFailure { log.warn("{}년 {}월 카탈로그를 못 받았습니다: {}", year, month, it.message) }
-                .getOrDefault(emptyList())
-        }
-        .distinctBy { it.wikidataId }
-        .distinctBy { it.steamAppId?.let { id -> "steam:$id" } ?: "wikidata:${it.wikidataId}" }
+    /**
+     * 몇 건을 받았는지만 남기면, 아무것도 안 들어온 날에 "Wikidata 에 없어서"인지
+     * "우리가 못 받아서"인지 구분할 수 없다. 실패한 달을 같이 돌려준다.
+     */
+    data class YearFetch(val items: List<CatalogGameItem>, val failedMonths: List<String>)
+
+    fun fetchReleaseYear(year: Int): YearFetch {
+        val failed = mutableListOf<String>()
+        val items = (1..12)
+            .flatMap { month ->
+                if (month > 1) runCatching { Thread.sleep(RANGE_REQUEST_INTERVAL_MS) }
+                val start = LocalDate.of(year, month, 1)
+                runCatching { fetchRange(start, start.plusMonths(1)) }
+                    .onFailure {
+                        failed += "%d-%02d: %s".format(year, month, it.message)
+                        log.warn("{}년 {}월 카탈로그를 못 받았습니다: {}", year, month, it.message)
+                    }
+                    .getOrDefault(emptyList())
+            }
+            .distinctBy { it.wikidataId }
+            .distinctBy { it.steamAppId?.let { id -> "steam:$id" } ?: "wikidata:${it.wikidataId}" }
+        return YearFetch(items, failed)
+    }
 
     fun fetchClassifications(wikidataIds: Collection<String>): Map<String, CatalogClassification> {
         val chunks = wikidataIds.filter { it.matches(Regex("Q\\d+")) }.distinct().chunked(40)

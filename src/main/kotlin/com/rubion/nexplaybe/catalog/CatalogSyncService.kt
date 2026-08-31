@@ -37,6 +37,13 @@ data class CatalogSyncSummary(
     val companiesCreated: Int,
     val dateChanges: Int = 0,
     val error: String? = null,
+    /** Wikidata 가 실제로 돌려준 건수. fetched(신규 후보)와 달리 이미 아는 게임도 센다. */
+    val fetchedRaw: Int = 0,
+    /** 이미 DB 에 있어 넘긴 수와, 중복·오류로 못 넣은 수. */
+    val alreadyKnown: Int = 0,
+    val skipped: Int = 0,
+    /** 못 받은 달. 비어 있어야 정상이다. */
+    val failedMonths: List<String> = emptyList(),
 )
 
 /**
@@ -108,7 +115,8 @@ class CatalogSyncService(
                 return CatalogSyncSummary("SKIPPED_SOURCE_DISABLED", year, 0, 0, 0)
             }
             run = collectorRunRepository.save(CollectorRun(source = source, startedAt = Instant.now()))
-            val fetchedItems = client.fetchReleaseYear(year)
+            val fetch = client.fetchReleaseYear(year)
+            val fetchedItems = fetch.items
             // 예전에는 이미 아는 게임을 여기서 걸러내고 끝이라, Wikidata 가 출시일을 바꿔도
             // 아무도 보지 않았다. release_revision 이 전부 INITIAL_CONFIRMATION 이었던 이유다.
             val dateChanges = recordReleaseDateChanges(fetchedItems)
@@ -160,7 +168,13 @@ class CatalogSyncService(
             run.newItemCount = inserted
             collectorRunRepository.save(run)
             refreshMagazineSubscriptions()
-            return CatalogSyncSummary("SUCCESS", year, classifiedItems.size, inserted, companiesCreated, dateChanges)
+            return CatalogSyncSummary(
+                "SUCCESS", year, classifiedItems.size, inserted, companiesCreated, dateChanges,
+                fetchedRaw = fetchedItems.size,
+                alreadyKnown = fetchedItems.size - discoveredItems.size,
+                skipped = skipped,
+                failedMonths = fetch.failedMonths,
+            )
         } catch (error: Exception) {
             run?.let {
                 it.finishedAt = Instant.now()
