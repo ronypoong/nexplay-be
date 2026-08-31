@@ -72,7 +72,11 @@ class WikidataCatalogClient(
         val chunks = wikidataIds.filter { it.matches(Regex("Q\\d+")) }.distinct().chunked(40)
         return chunks.flatMapIndexed { index, chunk ->
             if (index > 0) Thread.sleep(CLASSIFICATION_REQUEST_INTERVAL_MS)
-            fetchClassificationChunk(chunk)
+            // 장르·플랫폼은 있으면 좋은 것이지 없으면 안 되는 것이 아니다.
+            // 한 덩어리가 실패했다고 그 해의 수집 전체를 버릴 이유는 없다.
+            runCatching { fetchClassificationChunk(chunk) }
+                .onFailure { log.warn("분류 {}건을 못 받았습니다: {}", chunk.size, it.message) }
+                .getOrDefault(emptyList())
         }.associate { it.first to it.second }
     }
 

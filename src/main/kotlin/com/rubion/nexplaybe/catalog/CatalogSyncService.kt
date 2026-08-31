@@ -16,6 +16,7 @@ import com.rubion.nexplaybe.release.ReleaseRepository
 import com.rubion.nexplaybe.release.ReleaseStatus
 import com.rubion.nexplaybe.source.PolicyStatus
 import com.rubion.nexplaybe.source.SourceRepository
+import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
@@ -95,6 +96,7 @@ class CatalogSyncService(
     private val maxNewSubscriptionsPerRun: Int,
 ) {
     private val running = AtomicBoolean(false)
+    private val log = LoggerFactory.getLogger(javaClass)
 
     fun sync(year: Int = LocalDate.now().year): CatalogSyncSummary {
         if (!running.compareAndSet(false, true)) return CatalogSyncSummary("SKIPPED_ALREADY_RUNNING", year, 0, 0, 0)
@@ -123,15 +125,35 @@ class CatalogSyncService(
             }
             var inserted = 0
             var companiesCreated = 0
+            var skipped = 0
+            // 같은 Steam appId 를 가리키는 Wikidata 항목이 둘 이상 있다. 본편과 에디션,
+            // 혹은 통합되지 않은 중복 항목이다. 예전에는 그 하나가 uk_game_steam_app_id 에
+            // 걸려 예외를 던졌고, 그 해의 남은 게임 전부가 통째로 날아갔다.
+            // 2026년이 몇 번을 돌려도 244개에서 멈춰 있던 이유가 이것이다.
+            val claimedSteamAppIds = mutableSetOf<Long>()
             classifiedItems.forEach { item ->
                 if (gameRepository.findByWikidataId(item.wikidataId) != null) return@forEach
-                val developerResult = resolveCompany(item.developers.firstOrNull(), CompanyType.DEVELOPER)
-                val publisherResult = resolveCompany(item.publishers.firstOrNull(), CompanyType.PUBLISHER)
-                companiesCreated += developerResult.second + publisherResult.second
-                val game = gameRepository.save(toGame(item, developerResult.first, publisherResult.first))
-                game.platforms.forEach { platform -> releaseRepository.save(toRelease(game, platform, item.releaseDate)) }
-                inserted++
+                val steamAppId = item.steamAppId
+                if (steamAppId != null &&
+                    (!claimedSteamAppIds.add(steamAppId) || gameRepository.findBySteamAppId(steamAppId) != null)
+                ) {
+                    skipped++
+                    return@forEach
+                }
+                // 그래도 무언가가 터지면 그 한 건만 잃는다. 뒤에 선 게임들까지 데려가지 않는다.
+                runCatching {
+                    val developerResult = resolveCompany(item.developers.firstOrNull(), CompanyType.DEVELOPER)
+                    val publisherResult = resolveCompany(item.publishers.firstOrNull(), CompanyType.PUBLISHER)
+                    companiesCreated += developerResult.second + publisherResult.second
+                    val game = gameRepository.save(toGame(item, developerResult.first, publisherResult.first))
+                    game.platforms.forEach { platform -> releaseRepository.save(toRelease(game, platform, item.releaseDate)) }
+                    inserted++
+                }.onFailure {
+                    skipped++
+                    log.warn("{} ({}) 를 저장하지 못했습니다: {}", item.title, item.wikidataId, it.message)
+                }
             }
+            if (skipped > 0) log.info("{}년 카탈로그에서 {}건을 건너뛰었습니다", year, skipped)
             run.finishedAt = Instant.now()
             run.status = CollectorRunStatus.SUCCESS
             run.fetchedCount = classifiedItems.size

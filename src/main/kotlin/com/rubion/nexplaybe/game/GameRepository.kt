@@ -24,4 +24,6 @@ interface GameRepository : JpaRepository<Game, Long> {
 
     @EntityGraph(attributePaths = ["developer", "publisher", "genres", "platforms", "gameModes"])
     fun findByWikidataId(wikidataId: String): Game?
+
+    fun findBySteamAppId(steamAppId: Long): Game?
 }
