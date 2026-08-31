@@ -101,7 +101,7 @@ class WikidataCatalogClient(
                   { ?game wdt:P155 ?related. BIND("PREQUEL" AS ?type) }
                   UNION
                   { ?game wdt:P156 ?related. BIND("SEQUEL" AS ?type) }
-                  SERVICE wikibase:label { bd:serviceParam wikibase:language "ko,en". }
+                  SERVICE wikibase:label { bd:serviceParam wikibase:language "ko,en,ja,mul". }
                 }
             """.trimIndent()
             val encoded = URLEncoder.encode(query, StandardCharsets.UTF_8)
@@ -128,7 +128,7 @@ class WikidataCatalogClient(
               OPTIONAL { ?game wdt:P136 ?genre. }
               OPTIONAL { ?game wdt:P400 ?platform. }
               OPTIONAL { ?game wdt:P404 ?mode. }
-              SERVICE wikibase:label { bd:serviceParam wikibase:language "ko,en". }
+              SERVICE wikibase:label { bd:serviceParam wikibase:language "ko,en,ja,mul". }
             }
         """.trimIndent()
         val encoded = URLEncoder.encode(query, StandardCharsets.UTF_8)
@@ -186,7 +186,7 @@ class WikidataCatalogClient(
               OPTIONAL { ?game wdt:P1733 ?steamAppId. }
               OPTIONAL { ?game wdt:P18 ?image. }
               FILTER(BOUND(?officialWebsite) || BOUND(?steamAppId))
-              SERVICE wikibase:label { bd:serviceParam wikibase:language "en,ko". }
+              SERVICE wikibase:label { bd:serviceParam wikibase:language "ko,en,ja,mul". }
             } ORDER BY ?date LIMIT $maxRows
         """.trimIndent()
         val encoded = URLEncoder.encode(query, StandardCharsets.UTF_8)
@@ -242,7 +242,14 @@ class WikidataCatalogClient(
                 )
             }
         }
-            .filter { it.steamAppId != null && (it.developers.isNotEmpty() || it.publishers.isNotEmpty()) }
+            // 예전에는 여기서 steamAppId 를 필수로 요구했다. SPARQL 은 "공식 웹사이트 또는
+            // 스팀"이면 통과시켜 놓고, 코틀린이 다시 스팀만 남긴 것이다. 그 결과 플레이스테이션·
+            // 닌텐도 독점작이 통째로 빠졌다 — 2026~2027년만 61개. 유튜브에 도배되는 대작이
+            // 정작 우리 목록에 없던 이유가 이것이다.
+            //
+            // 개발사나 배급사 이름은 계속 요구한다. 그것도 없는 항목은 아직 게임이라기보다
+            // 만들다 만 위키 문서에 가깝다.
+            .filter { it.developers.isNotEmpty() || it.publishers.isNotEmpty() }
     }
 
     private fun addCompany(
