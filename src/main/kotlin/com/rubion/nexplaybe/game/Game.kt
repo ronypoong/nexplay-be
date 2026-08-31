@@ -57,7 +57,9 @@ class Game(
      */
     var coverImageUrl: String? = null,
     @Column(name = "image_source", length = 40)
-    val imageSource: String? = null,
+    // 표지를 나중에 채우면 출처도 같이 바뀐다. val 이면 화면에는 새 그림이,
+    // 기록에는 옛 출처가 남는다.
+    var imageSource: String? = null,
     @Column(name = "korean_text_supported")
     var koreanTextSupported: Boolean? = null,
     @Column(name = "korean_audio_supported")

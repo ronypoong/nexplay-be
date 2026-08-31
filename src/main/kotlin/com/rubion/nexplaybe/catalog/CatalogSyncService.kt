@@ -231,7 +231,10 @@ class CatalogSyncService(
             .filter { it.steamAppId != null }
             .filter { game ->
                 game.genres.isEmpty() || game.genres.all { it == "2026 신작" || it == "미분류" } ||
-                    game.platforms.isEmpty() || game.platforms.all { it == "미정" } || game.gameModes.isEmpty()
+                    game.platforms.isEmpty() || game.platforms.all { it == "미정" } || game.gameModes.isEmpty() ||
+                    // 표지가 없는 것도 채워야 할 대상이다. 예전에는 장르·플랫폼만 보고
+                    // 골랐던 탓에, 장르는 멀쩡한데 카드가 빈 게임이 계속 남아 있었다.
+                    game.coverImageUrl.isNullOrBlank()
             }
             .take(limit.coerceIn(1, 2_000))
             .toList()
@@ -264,6 +267,11 @@ class CatalogSyncService(
             if (metadata.gameModes.isNotEmpty()) {
                 game.gameModes.clear()
                 game.gameModes.addAll(metadata.gameModes)
+            }
+            // 이미 표지가 있으면 건드리지 않는다. 손으로 넣어둔 것을 덮어쓰면 안 된다.
+            if (game.coverImageUrl.isNullOrBlank()) {
+                game.coverImageUrl = metadata.headerImageUrl
+                game.imageSource = "STEAM_STOREFRONT_API"
             }
             applyStoreCopy(game, metadata)
             gameRepository.save(game)
