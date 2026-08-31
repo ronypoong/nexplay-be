@@ -11,6 +11,7 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.LocalDate
+import org.slf4j.LoggerFactory
 
 data class CatalogCompanyRef(val wikidataId: String?, val name: String)
 data class CatalogGameItem(
@@ -39,6 +40,7 @@ class WikidataCatalogClient(
     private val timeout = Duration.ofSeconds(timeoutSeconds)
     private val httpClient = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val objectMapper = jacksonObjectMapper()
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * 한 해를 달 단위로 나눠 받는다.
@@ -57,7 +59,11 @@ class WikidataCatalogClient(
         .flatMap { month ->
             if (month > 1) runCatching { Thread.sleep(RANGE_REQUEST_INTERVAL_MS) }
             val start = LocalDate.of(year, month, 1)
-            fetchRange(start, start.plusMonths(1))
+            // 한 달이 실패해도 나머지 열한 달은 살린다. 예전에는 6월 한 번의 502 로
+            // 그 해 전체가 날아갔다 — 스케줄러 단계를 격리한 것과 같은 이유다.
+            runCatching { fetchRange(start, start.plusMonths(1)) }
+                .onFailure { log.warn("{}년 {}월 카탈로그를 못 받았습니다: {}", year, month, it.message) }
+                .getOrDefault(emptyList())
         }
         .distinctBy { it.wikidataId }
         .distinctBy { it.steamAppId?.let { id -> "steam:$id" } ?: "wikidata:${it.wikidataId}" }
@@ -131,6 +137,25 @@ class WikidataCatalogClient(
         return grouped.map { (id, value) -> id to CatalogClassification(value.genres, value.platforms, value.modes) }
     }
 
+    /**
+     * 잠깐 막힌 것과 정말 안 되는 것을 가른다.
+     *
+     * Wikidata 는 몰아치면 502·503·429 를 돌려준다. 그건 "지금은 말고" 라는 뜻이지
+     * "그런 데이터는 없다" 가 아니다. 한 번 쉬고 다시 물으면 대개 온다.
+     */
+    private fun sendWithRetry(request: HttpRequest): HttpResponse<String> {
+        var last: HttpResponse<String>? = null
+        repeat(RETRY_ATTEMPTS) { attempt ->
+            if (attempt > 0) runCatching { Thread.sleep(RETRY_BACKOFF_MS * attempt) }
+            val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+            if (response.statusCode() in 200..299) return response
+            if (response.statusCode() !in RETRYABLE) return response
+            log.warn("Wikidata 가 HTTP {} 를 돌려줬습니다. {}번째 시도", response.statusCode(), attempt + 1)
+            last = response
+        }
+        return requireNotNull(last)
+    }
+
     private fun fetchRange(start: LocalDate, endExclusive: LocalDate): List<CatalogGameItem> {
         val query = """
             SELECT ?game ?gameLabel ?date ?developer ?developerLabel ?publisher ?publisherLabel ?officialWebsite ?steamAppId ?image WHERE {
@@ -156,7 +181,7 @@ class WikidataCatalogClient(
             .header("User-Agent", "NEXPLAY/0.1 (2026 game catalog sync; https://github.com/rubi-on)")
             .GET()
             .build()
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        val response = sendWithRetry(request)
         check(response.statusCode() in 200..299) { "Wikidata query failed: HTTP ${response.statusCode()}" }
 
         data class Builder(
@@ -309,7 +334,11 @@ class WikidataCatalogClient(
 
     private companion object {
         /** 한 해에 열두 번 부르므로 간격을 둔다. Wikidata 는 무료지만 예의는 지킨다. */
-        const val RANGE_REQUEST_INTERVAL_MS = 400L
+        const val RANGE_REQUEST_INTERVAL_MS = 1_200L
+        const val RETRY_ATTEMPTS = 3
+        const val RETRY_BACKOFF_MS = 2_000L
+        /** 잠깐 막힌 것들. 이건 다시 물어볼 값이 있다. */
+        val RETRYABLE = setOf(429, 500, 502, 503, 504)
         const val CLASSIFICATION_REQUEST_INTERVAL_MS = 1_000L
         const val CLASSIFICATION_RETRY_BASE_MS = 3_000L
         const val CLASSIFICATION_MAX_ATTEMPTS = 3
