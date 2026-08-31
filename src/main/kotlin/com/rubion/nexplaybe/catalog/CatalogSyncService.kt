@@ -141,6 +141,13 @@ class CatalogSyncService(
             val claimedSteamAppIds = mutableSetOf<Long>()
             classifiedItems.forEach { item ->
                 if (gameRepository.findByWikidataId(item.wikidataId) != null) return@forEach
+                // 여기까지 와서도 만든 곳을 모른다면, 스팀에 물어볼 예산이 이번엔 모자랐다는
+                // 뜻이다. 그런 걸 넣으면 "Independent / Unknown" 에 표지도 없는 빈 카드가 된다.
+                // 넣지 않고 남겨두면 다음 수집 때 예산이 돌아와 제대로 채워서 들어온다.
+                if (item.developers.isEmpty() && item.publishers.isEmpty()) {
+                    skipped++
+                    return@forEach
+                }
                 val steamAppId = item.steamAppId
                 if (steamAppId != null &&
                     (!claimedSteamAppIds.add(steamAppId) || gameRepository.findBySteamAppId(steamAppId) != null)
