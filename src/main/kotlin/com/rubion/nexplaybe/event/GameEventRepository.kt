@@ -19,6 +19,17 @@ interface GameEventRepository : JpaRepository<GameEvent, Long> {
     @Query("select distinct e from GameEvent e where e.game.slug = :slug order by e.publishedAt desc")
     fun findByGameSlug(@Param("slug") slug: String): List<GameEvent>
 
+    /**
+     * 데모·베타 화면이 쓴다. 기간이 지나면 못 해 보는 것들이라 최근 것만 본다.
+     * 전체 피드를 받아 코틀린에서 거르면 1만 건을 매번 끌고 오게 된다.
+     */
+    @EntityGraph(attributePaths = ["game", "sources", "sources.source"])
+    @Query("select distinct e from GameEvent e where e.type in :types and e.eventDate >= :since order by e.publishedAt desc")
+    fun findByTypesSince(
+        @Param("types") types: Collection<GameEventType>,
+        @Param("since") since: LocalDate,
+    ): List<GameEvent>
+
     @EntityGraph(attributePaths = ["game", "sources", "sources.source"])
     @Query("select distinct e from GameEvent e where e.game.id = :gameId and e.type = :type and e.eventDate between :from and :to")
     fun findMergeCandidates(

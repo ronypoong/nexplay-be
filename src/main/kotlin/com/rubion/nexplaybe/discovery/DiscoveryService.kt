@@ -94,6 +94,41 @@ class DiscoveryService(
         return ranked.mapNotNull(byId::get).map { it.toResponse(clock, insights[it.id]) }
     }
 
+    /**
+     * 지금 해 볼 수 있는 것: 데모·베타·플레이테스트.
+     *
+     * 다른 목록과 성격이 다르다. 2027년 출시작은 급할 게 없지만 이건 기간이
+     * 끝나면 사라진다. 그래서 중요도가 아니라 최근순으로 두고, 오래된 것은
+     * 아예 빼 버린다 — 이미 닫힌 테스트를 목록 위쪽에 두는 것이 제일 나쁘다.
+     *
+     * 분류가 DEMO·BETA 가 아니어도 모델이 본문에서 체험판 배포를 찾아낸 소식은
+     * 함께 싣는다. 스팀 공지 상당수가 그냥 "공지"로 들어오는데, 그 안에
+     * 데모가 열렸다는 문장이 들어 있는 경우가 많다.
+     */
+    @Cacheable(CacheConfig.SECTIONS, key = "'playtests-' + #days")
+    fun playtests(days: Int = DEFAULT_PLAYTEST_DAYS): List<GameEventResponse> {
+        val insights = eventInsightLookup.insights()
+        val since = LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")))
+            .minusDays(days.coerceIn(1, 365).toLong())
+        val byType = eventRepository.findByTypesSince(PLAYTEST_TYPES, since)
+        // 모델이 체험판이라고 표시한 소식. id 로만 다시 집어 오므로 전체를 훑지 않는다.
+        val flaggedIds = insights.filterValues { it.hasDemo }.keys - byType.map { it.id }.toSet()
+        val flagged = if (flaggedIds.isEmpty()) emptyList() else eventRepository.findFeedEventsByIds(flaggedIds)
+        return (byType + flagged)
+            .asSequence()
+            .distinctBy { it.id }
+            .filter { it.eventDate >= since }
+            .filterNot { insights[it.id]?.marketingNoise == true }
+            // 발표 시각까지 보고 세운다. 날짜만 쓰면 같은 날 것들의 순서가 매번 달라진다.
+            .sortedByDescending { it.publishedAt }
+            .map { it.toResponse(clock, insights[it.id]) }
+            // 할인·패치·예약구매는 지금 해 볼 수 있는 것이 아니다. 본문에 "데모"라는
+            // 낱말이 있다는 이유로 모델이 표시해 둔 것들인데, 이 화면의 약속은
+            // "눌러서 지금 해 볼 수 있다"이므로 그 약속을 깨는 것은 뺀다.
+            .filterNot { it.type in NOT_PLAYABLE_NOW }
+            .toList()
+    }
+
     /** 같은 장르를 공유하는 게임. 상세 화면이 전체 카탈로그를 받아 3개만 쓰던 것을 대신한다. */
     fun related(slug: String, limit: Int = 3): List<GameCardResponse> {
         val games = catalogSnapshot.entries()
@@ -163,6 +198,27 @@ class DiscoveryService(
         const val UPCOMING_LIMIT = 10
         const val HIDDEN_GEM_COUNT = 2
         const val NEWS_PAGE_SIZE = 40
+
+        /**
+         * 데모·베타를 며칠까지 볼 것인가.
+         *
+         * 스팀 플레이테스트는 대개 한두 주 열린다. 45일이면 이미 닫힌 것도
+         * 섞이지만, 기간을 글에 적지 않는 공지가 많아 우리가 닫힘을 알 수 없다.
+         * 너무 좁히면 아직 열려 있는 것까지 사라진다. 넓게 두고 최근순으로
+         * 세우는 편이 낫다.
+         */
+        const val DEFAULT_PLAYTEST_DAYS = 45
+        val PLAYTEST_TYPES = setOf(
+            com.rubion.nexplaybe.event.GameEventType.DEMO,
+            com.rubion.nexplaybe.event.GameEventType.BETA,
+        )
+
+        /**
+         * 모델이 체험판이라 표시했더라도 이 분류로 다시 적힌 소식은 싣지 않는다.
+         * 분류는 모델이 본문 전체를 보고 고른 것이라 본문에 스친 "데모"라는
+         * 낱말보다 믿을 만하다.
+         */
+        val NOT_PLAYABLE_NOW = setOf("DISCOUNT", "PATCH", "PREORDER", "RELEASE")
     }
 }
 

@@ -101,6 +101,10 @@ class DiscoveryController(
     @GetMapping("/events/{id}")
     fun eventDetail(@PathVariable id: Long) = eventDetailService.detail(id)
 
+    /** 지금 해 볼 수 있는 데모·베타·플레이테스트. 최근순이다. */
+    @GetMapping("/playtests")
+    fun playtests(@RequestParam(defaultValue = "45") days: Int) = discoveryService.playtests(days)
+
     /** 약속과 결과의 대조표: 퍼블리셔별 신뢰도와 실제로 밀린 기록. */
     @GetMapping("/promises")
     fun promises() = promiseQueryService.ledger()

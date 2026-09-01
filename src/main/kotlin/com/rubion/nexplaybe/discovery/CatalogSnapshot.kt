@@ -33,6 +33,14 @@ data class CatalogEntry(
     val genres: Set<String>,
     val platforms: Set<String>,
     val searchText: String,
+    /**
+     * 회사 화면이 게임을 고를 때 쓴다.
+     *
+     * 카드에는 회사 이름만 들어 있다. 이름으로 맞추면 같은 회사가 "Capcom" 과
+     * "캡콤" 으로 갈라져 한쪽 목록이 통째로 빈다. 슬러그는 회사 하나에 하나뿐이다.
+     */
+    val developerSlug: String,
+    val publisherSlug: String,
 )
 
 /**
@@ -88,6 +96,8 @@ class CatalogSnapshot(
                 searchText = (listOf(game.title, game.developer.name, game.publisher.name) + game.genres + game.platforms)
                     .joinToString(" ")
                     .lowercase(),
+                developerSlug = game.developer.slug,
+                publisherSlug = game.publisher.slug,
             )
         }
     }
