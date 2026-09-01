@@ -230,6 +230,25 @@ class WikidataCatalogClient(
      */
     private data class RangeFetch(val items: List<CatalogGameItem>, val hitRowLimit: Boolean)
 
+    /**
+     * 쿼리의 FILTER 는 "이 항목이 실재하는 게임인가"를 판단하는 줄이다.
+     *
+     * 예전에는 공식 웹사이트나 스팀 페이지를 요구했다. 그런데 퍼스트파티 콘솔
+     * 독점작은 둘 다 없는 경우가 흔하다 — 소니·닌텐도는 자기 포털에만 올리고
+     * Wikidata 의 P856 은 비어 있다.
+     *
+     * 그래서 God of War Laufey 가 빠져 있었다. 개발사(산타모니카)·배급사(소니)·
+     * 플랫폼(PS5)·출시일(2027-02-16)이 다 적혀 있는데도 스토어 링크가 없다는
+     * 이유로 쿼리 단계에서 잘렸다. 마블 울버린, Until Dawn 2, Pokémon Waves,
+     * Arma 4, EA Sports FC 27, 드래곤즈 도그마 2 도 같은 줄에 걸려 있었다 —
+     * 2025~2028년만 174개다.
+     *
+     * 만든 곳을 아는 것도 실재의 근거다. 개발사도 배급사도 스토어도 없는 항목만 버린다.
+     *
+     * 다만 이렇게 들어온 게임은 스팀 표지가 없다. 174개 중 P18 이미지가 있는 것도
+     * 한 개뿐이다. 목록에는 있는데 카드에 그림이 없는 상태가 되므로, 표지는
+     * gamesMissingCover 로 뽑아 따로 채워야 한다.
+     */
     private fun fetchRange(start: LocalDate, endExclusive: LocalDate): RangeFetch {
         val query = """
             SELECT ?game ?gameLabel ?date ?developer ?developerLabel ?publisher ?publisherLabel ?officialWebsite ?steamAppId ?image WHERE {
@@ -244,7 +263,7 @@ class WikidataCatalogClient(
               OPTIONAL { ?game wdt:P856 ?officialWebsite. }
               OPTIONAL { ?game wdt:P1733 ?steamAppId. }
               OPTIONAL { ?game wdt:P18 ?image. }
-              FILTER(BOUND(?officialWebsite) || BOUND(?steamAppId))
+              FILTER(BOUND(?officialWebsite) || BOUND(?steamAppId) || BOUND(?developer) || BOUND(?publisher))
               SERVICE wikibase:label { bd:serviceParam wikibase:language "ko,en,ja,mul". }
             } ORDER BY ?date LIMIT $maxRows
         """.trimIndent()
