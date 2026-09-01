@@ -11,6 +11,7 @@ import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import org.slf4j.LoggerFactory
 
 data class CatalogCompanyRef(val wikidataId: String?, val name: String)
@@ -43,31 +44,40 @@ class WikidataCatalogClient(
     private val log = LoggerFactory.getLogger(javaClass)
 
     /**
-     * 한 해를 달 단위로 나눠 받는다.
+     * 한 해를 달 단위로 나눠 받되, 상한에 닿은 달은 더 잘게 쪼개 다시 받는다.
      *
      * 분기로 나눠 받고 있었는데 1분기가 상한(500행)에 걸려 3월 13일에서 잘렸다.
      * 그 뒤에 나오는 게임은 통째로 안 보인다 — 붉은사막(3월 19일)이 딱 그 선
-     * 너머에 있었다.
+     * 너머에 있었다. 그래서 달 단위로 줄였는데, 그것도 모자랐다.
      *
-     * 달로 나누면 한 창이 작아져 상한에 닿지 않는다. 요청 수는 네 배가 되지만
-     * Wikidata 는 무료이고, 못 가져온 게임은 어디서도 메울 수 없다.
+     * 한 게임이 한 행으로 오지 않는 것이 문제다. 개발사·배급사·이미지를 OPTIONAL
+     * 로 붙였으니 값이 많은 게임일수록 행이 불어난다. 이미 나온 게임은 위키가
+     * 잘 채워져 있어 행이 많고, 그래서 하필 과거 달이 먼저 상한에 닿는다.
+     * 2025년 1~6월이 전부 10일 언저리에서 끊겨 있었다 — 몬스터 헌터 와일즈,
+     * 어쌔신 크리드 섀도우스, 클레르 옵스퀴르, 나이트레인이 모두 그 선 너머였다.
      *
-     * 상한에 닿으면 그 달은 잘린 것이므로 기록을 남긴다. 조용히 잘리는 것이
-     * 이 일에서 가장 나쁘다.
+     * 달을 고정 폭으로 쓰는 한 언젠가 또 닿는다. 그래서 폭을 미리 정하지 않고,
+     * 상한에 닿으면 그 창을 반으로 갈라 다시 묻는다. 하루까지 갈라도 여전히
+     * 닿는다면 그건 정말로 못 가져온 것이므로 기록을 남긴다.
+     * 조용히 잘리는 것이 이 일에서 가장 나쁘다.
      */
     /**
      * 몇 건을 받았는지만 남기면, 아무것도 안 들어온 날에 "Wikidata 에 없어서"인지
-     * "우리가 못 받아서"인지 구분할 수 없다. 실패한 달을 같이 돌려준다.
+     * "우리가 못 받아서"인지 구분할 수 없다. 실패한 달과 끝내 잘린 창을 같이 돌려준다.
      */
-    data class YearFetch(val items: List<CatalogGameItem>, val failedMonths: List<String>)
+    data class YearFetch(
+        val items: List<CatalogGameItem>,
+        val failedMonths: List<String>,
+        val truncatedWindows: List<String> = emptyList(),
+    )
 
     fun fetchReleaseYear(year: Int): YearFetch {
         val failed = mutableListOf<String>()
+        val truncated = mutableListOf<String>()
         val items = (1..12)
             .flatMap { month ->
-                if (month > 1) runCatching { Thread.sleep(RANGE_REQUEST_INTERVAL_MS) }
                 val start = LocalDate.of(year, month, 1)
-                runCatching { fetchRange(start, start.plusMonths(1)) }
+                runCatching { fetchWindow(start, start.plusMonths(1), failed, truncated) }
                     .onFailure {
                         failed += "%d-%02d: %s".format(year, month, it.message)
                         log.warn("{}년 {}월 카탈로그를 못 받았습니다: {}", year, month, it.message)
@@ -76,7 +86,49 @@ class WikidataCatalogClient(
             }
             .distinctBy { it.wikidataId }
             .distinctBy { it.steamAppId?.let { id -> "steam:$id" } ?: "wikidata:${it.wikidataId}" }
-        return YearFetch(items, failed)
+        return YearFetch(items, failed, truncated)
+    }
+
+    /**
+     * 창 하나를 받아오고, 상한에 닿았으면 반으로 갈라 다시 받는다.
+     *
+     * 가른 쪽 하나가 실패해도 다른 쪽은 살린다. 한 창이 안 됐다고 그 달을
+     * 통째로 버리면, 고치려던 문제를 그대로 다시 만드는 것이다.
+     */
+    private fun fetchWindow(
+        start: LocalDate,
+        endExclusive: LocalDate,
+        failed: MutableList<String>,
+        truncated: MutableList<String>,
+    ): List<CatalogGameItem> {
+        runCatching { Thread.sleep(RANGE_REQUEST_INTERVAL_MS) }
+        val fetch = fetchRange(start, endExclusive)
+        if (!fetch.hitRowLimit) return fetch.items
+
+        val days = ChronoUnit.DAYS.between(start, endExclusive)
+        if (days <= 1) {
+            // 하루짜리 창이 상한에 닿았다. 더 가를 수 없으니 무엇을 못 가져왔는지 남긴다.
+            truncated += "$start (하루 안에서 상한 $maxRows 행)"
+            log.warn("{} 하루가 상한 {}행에 닿아 잘렸습니다. max-rows 를 올려야 합니다.", start, maxRows)
+            return fetch.items
+        }
+
+        val mid = start.plusDays(days / 2)
+        log.info("{} ~ {} 가 상한 {}행에 닿아 {} 기준으로 나눠 다시 받습니다.", start, endExclusive, maxRows, mid)
+        // 잘린 결과도 버리지 않는다. 어차피 뒤에서 wikidataId 로 합쳐진다.
+        return fetch.items +
+            runCatching { fetchWindow(start, mid, failed, truncated) }
+                .onFailure {
+                    failed += "$start~$mid: ${it.message}"
+                    log.warn("{} ~ {} 를 못 받았습니다: {}", start, mid, it.message)
+                }
+                .getOrDefault(emptyList()) +
+            runCatching { fetchWindow(mid, endExclusive, failed, truncated) }
+                .onFailure {
+                    failed += "$mid~$endExclusive: ${it.message}"
+                    log.warn("{} ~ {} 를 못 받았습니다: {}", mid, endExclusive, it.message)
+                }
+                .getOrDefault(emptyList())
     }
 
     fun fetchClassifications(wikidataIds: Collection<String>): Map<String, CatalogClassification> {
@@ -171,7 +223,14 @@ class WikidataCatalogClient(
         return requireNotNull(last)
     }
 
-    private fun fetchRange(start: LocalDate, endExclusive: LocalDate): List<CatalogGameItem> {
+    /**
+     * 상한에 닿았는지는 행 수로만 알 수 있다. 게임 수로 세면 안 된다 —
+     * 한 게임이 여러 행으로 오므로 게임 수는 상한보다 늘 작고, 그래서
+     * 잘린 창이 멀쩡해 보인다. 정확히 그 착각 때문에 반년치가 조용히 비었다.
+     */
+    private data class RangeFetch(val items: List<CatalogGameItem>, val hitRowLimit: Boolean)
+
+    private fun fetchRange(start: LocalDate, endExclusive: LocalDate): RangeFetch {
         val query = """
             SELECT ?game ?gameLabel ?date ?developer ?developerLabel ?publisher ?publisherLabel ?officialWebsite ?steamAppId ?image WHERE {
               { SELECT ?game (MIN(?published) AS ?date) WHERE {
@@ -211,7 +270,9 @@ class WikidataCatalogClient(
         )
 
         val grouped = linkedMapOf<String, Builder>()
-        objectMapper.readTree(response.body()).path("results").path("bindings").forEach { binding ->
+        val bindings = objectMapper.readTree(response.body()).path("results").path("bindings")
+        val hitRowLimit = bindings.size() >= maxRows
+        bindings.forEach { binding ->
             val gameUri = binding.path("game").path("value").asText()
             val gameId = gameUri.substringAfterLast('/')
             val title = binding.path("gameLabel").path("value").asText()
@@ -227,7 +288,7 @@ class WikidataCatalogClient(
             addCompany(binding, "developer", "developerLabel", builder.developers)
             addCompany(binding, "publisher", "publisherLabel", builder.publishers)
         }
-        return grouped.values.mapNotNull { value ->
+        val items = grouped.values.mapNotNull { value ->
             value.date?.let {
                 CatalogGameItem(
                     wikidataId = value.id,
@@ -254,6 +315,7 @@ class WikidataCatalogClient(
             // 스팀 페이지도 있는데 개발사 칸이 비었다는 이유로 버려졌다.
             // 스팀 ID 가 있으면 스토어가 개발사와 배급사를 알려주므로, 받아두고 나중에 채운다.
             .filter { it.steamAppId != null || it.developers.isNotEmpty() || it.publishers.isNotEmpty() }
+        return RangeFetch(items, hitRowLimit)
     }
 
     private fun addCompany(
