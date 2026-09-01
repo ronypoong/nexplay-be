@@ -44,6 +44,8 @@ data class CatalogSyncSummary(
     val skipped: Int = 0,
     /** 못 받은 달. 비어 있어야 정상이다. */
     val failedMonths: List<String> = emptyList(),
+    /** 하루까지 쪼개고도 상한에 닿아 끝내 잘린 창. 비어 있어야 정상이다. */
+    val truncatedWindows: List<String> = emptyList(),
 )
 
 /**
@@ -120,7 +122,15 @@ class CatalogSyncService(
             // 예전에는 이미 아는 게임을 여기서 걸러내고 끝이라, Wikidata 가 출시일을 바꿔도
             // 아무도 보지 않았다. release_revision 이 전부 INITIAL_CONFIRMATION 이었던 이유다.
             val dateChanges = recordReleaseDateChanges(fetchedItems)
-            val discoveredItems = fetchedItems.filter { gameRepository.findByWikidataId(it.wikidataId) == null }
+            // 조회가 끊기면 이 게임이 새 것인지 알 수 없다. 모르면 넣지 않는다 —
+            // 이번 회차에서 빠지고 다음 회차에 다시 후보가 된다. 넣었다가 중복을
+            // 만드는 것보다 한 번 미루는 쪽이 낫다.
+            val discoveredItems = fetchedItems.filter { item ->
+                findKnownGameOrNull(item.wikidataId).fold(
+                    onSuccess = { it == null },
+                    onFailure = { false },
+                )
+            }
             val items = enrichNewItemsFromSteam(discoveredItems)
             val classifications = client.fetchClassifications(items.map { it.wikidataId })
             val classifiedItems = items.map { item ->
@@ -140,23 +150,28 @@ class CatalogSyncService(
             // 2026년이 몇 번을 돌려도 244개에서 멈춰 있던 이유가 이것이다.
             val claimedSteamAppIds = mutableSetOf<Long>()
             classifiedItems.forEach { item ->
-                if (gameRepository.findByWikidataId(item.wikidataId) != null) return@forEach
-                // 여기까지 와서도 만든 곳을 모른다면, 스팀에 물어볼 예산이 이번엔 모자랐다는
-                // 뜻이다. 그런 걸 넣으면 "Independent / Unknown" 에 표지도 없는 빈 카드가 된다.
-                // 넣지 않고 남겨두면 다음 수집 때 예산이 돌아와 제대로 채워서 들어온다.
-                if (item.developers.isEmpty() && item.publishers.isEmpty()) {
-                    skipped++
-                    return@forEach
-                }
-                val steamAppId = item.steamAppId
-                if (steamAppId != null &&
-                    (!claimedSteamAppIds.add(steamAppId) || gameRepository.findBySteamAppId(steamAppId) != null)
-                ) {
-                    skipped++
-                    return@forEach
-                }
-                // 그래도 무언가가 터지면 그 한 건만 잃는다. 뒤에 선 게임들까지 데려가지 않는다.
+                // 무언가가 터지면 그 한 건만 잃는다. 뒤에 선 게임들까지 데려가지 않는다.
+                //
+                // 예전에는 아래 두 조회가 이 울타리 밖에 있었다. 원격 DB 앞의 프록시가
+                // 유휴 커넥션을 끊자 findByWikidataId 가 그대로 던졌고, 2025년 수집이
+                // 삽입 도중에 통째로 멈췄다 — 그때까지 넣은 291건만 남고 나머지는 사라졌다.
+                // 조회도 저장과 같은 울타리 안에 둔다.
                 runCatching {
+                    if (gameRepository.findByWikidataId(item.wikidataId) != null) return@runCatching
+                    // 여기까지 와서도 만든 곳을 모른다면, 스팀에 물어볼 예산이 이번엔 모자랐다는
+                    // 뜻이다. 그런 걸 넣으면 "Independent / Unknown" 에 표지도 없는 빈 카드가 된다.
+                    // 넣지 않고 남겨두면 다음 수집 때 예산이 돌아와 제대로 채워서 들어온다.
+                    if (item.developers.isEmpty() && item.publishers.isEmpty()) {
+                        skipped++
+                        return@runCatching
+                    }
+                    val steamAppId = item.steamAppId
+                    if (steamAppId != null &&
+                        (!claimedSteamAppIds.add(steamAppId) || gameRepository.findBySteamAppId(steamAppId) != null)
+                    ) {
+                        skipped++
+                        return@runCatching
+                    }
                     val developerResult = resolveCompany(item.developers.firstOrNull(), CompanyType.DEVELOPER)
                     val publisherResult = resolveCompany(item.publishers.firstOrNull(), CompanyType.PUBLISHER)
                     companiesCreated += developerResult.second + publisherResult.second
@@ -174,13 +189,19 @@ class CatalogSyncService(
             run.fetchedCount = classifiedItems.size
             run.newItemCount = inserted
             collectorRunRepository.save(run)
-            refreshMagazineSubscriptions()
+            // 뉴스 구독 보강은 이미 끝난 수집의 덤이다. 이게 실패했다고 방금 넣은
+            // 게임들이 FAILED 로 기록될 이유는 없다. 2027년 수집이 그랬다 —
+            // God of War Laufey 를 제대로 넣고 커밋까지 했는데, 그 뒤 구독 조회에서
+            // 커넥션이 끊겨 그 회차 전체가 실패로 남았다.
+            runCatching { refreshMagazineSubscriptions() }
+                .onFailure { log.warn("{}년 뉴스 구독 보강을 건너뜁니다: {}", year, it.message) }
             return CatalogSyncSummary(
                 "SUCCESS", year, classifiedItems.size, inserted, companiesCreated, dateChanges,
                 fetchedRaw = fetchedItems.size,
                 alreadyKnown = fetchedItems.size - discoveredItems.size,
                 skipped = skipped,
                 failedMonths = fetch.failedMonths,
+                truncatedWindows = fetch.truncatedWindows,
             )
         } catch (error: Exception) {
             run?.let {
@@ -354,14 +375,30 @@ class CatalogSyncService(
      * Wikidata 가 알려주는 출시일이 저장된 값과 다르면 이력으로 남기고 게임을 갱신한다.
      * 연기 이력이 쌓여야 "이 개발사는 얼마나 미루는가" 를 말할 수 있다.
      */
+    /**
+     * 한 건을 찾는 조회인데도 개발사·배급사·장르·플랫폼·모드를 함께 끌어오는
+     * 조인이다(@EntityGraph). 원격 DB 로는 왕복 한 번이 가볍지 않고, 한 해에
+     * 수천 번을 돈다. 그 중 한 번이 끊기는 것은 사고가 아니라 예상되는 일이다.
+     *
+     * 그래서 예외를 밖으로 내보내지 않는다. 예전에는 그대로 던져서, 2026년 수집이
+     * 조회 한 번 때문에 통째로 실패했다 — 게임 1100건을 받아 놓고 하나도 못 넣었다.
+     * 항목이 적은 2027·2028년만 우연히 살아남아 문제가 가려져 있었다.
+     */
+    private fun findKnownGameOrNull(wikidataId: String): Result<Game?> =
+        runCatching { gameRepository.findByWikidataId(wikidataId) }
+            .onFailure { log.warn("{} 조회가 실패했습니다: {}", wikidataId, it.message) }
+
     private fun recordReleaseDateChanges(items: List<CatalogGameItem>): Int {
         var changes = 0
         items.forEach { item ->
-            val game = gameRepository.findByWikidataId(item.wikidataId) ?: return@forEach
-            val previous = game.releaseDate ?: return@forEach
-            if (previous == item.releaseDate) return@forEach
+            // 출시일 이력은 수집의 본체가 아니다. 한 건을 못 적었다고 그 해의
+            // 게임을 못 넣게 되면 손해가 훨씬 크다.
+            runCatching {
+            val game = findKnownGameOrNull(item.wikidataId).getOrNull() ?: return@runCatching
+            val previous = game.releaseDate ?: return@runCatching
+            if (previous == item.releaseDate) return@runCatching
             // 연도만 아는 날짜(1월 1일)끼리 해가 같으면 정밀도 차이일 뿐 변경이 아니다.
-            if (isYearOnly(previous) && isYearOnly(item.releaseDate) && previous.year == item.releaseDate.year) return@forEach
+            if (isYearOnly(previous) && isYearOnly(item.releaseDate) && previous.year == item.releaseDate.year) return@runCatching
             val changeType = when {
                 isYearOnly(previous) || isYearOnly(item.releaseDate) -> "DATE_CHANGE"
                 item.releaseDate.isAfter(previous) -> "DELAY"
@@ -388,6 +425,7 @@ class CatalogSyncService(
                 game.id,
             )
             changes++
+            }.onFailure { log.warn("{} 의 출시일 이력을 남기지 못했습니다: {}", item.title, it.message) }
         }
         return changes
     }
