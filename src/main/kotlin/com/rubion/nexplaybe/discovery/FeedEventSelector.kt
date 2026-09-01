@@ -36,7 +36,6 @@ class FeedEventSelector(private val jdbc: JdbcTemplate) {
         JOIN game g ON g.id = e.game_id
         LEFT JOIN game_event_extraction x ON x.event_id = e.id AND x.prompt_version = 1
         WHERE g.archive_only = 0
-          AND COALESCE(x.is_marketing_noise, 0) = 0
         ORDER BY (
             CASE COALESCE(NULLIF(x.event_type, ''), e.type)
                 WHEN 'RELEASE_DATE'  THEN 100
@@ -62,6 +61,19 @@ class FeedEventSelector(private val jdbc: JdbcTemplate) {
             -- 오래될수록 내린다. 60일이 지나면 더 내리지 않는다 — 그 아래로는
             -- 종류와 중요도가 날짜보다 낫다.
             - LEAST(GREATEST(DATEDIFF(CURRENT_DATE, e.event_date), 0), 60) / 2
+            -- 홍보성 표시는 내리는 이유지 지우는 이유가 아니다.
+            --
+            -- 여기서 통째로 걸러내고 있었다. 그런데 모델이 붙이는 이 표시는
+            -- 할인·데모처럼 원래 홍보의 얼굴을 한 소식에도 붙는다. 실제로
+            -- 할인의 47%, 데모의 32% 가 이 표시를 달았고, 그렇게 접힌 소식이
+            -- 268건이다. "Kusan: City of Wolves Is Out Now!" 같은 출시 소식도
+            -- 그 안에 있었다.
+            --
+            -- 분류 프롬프트는 "지우지는 않고 표시만 합니다" 라고 적혀 있고
+            -- 화면에도 '홍보성' 배지가 이미 있다. 소비하는 쪽만 그 약속을
+            -- 어기고 있었다. -30 이면 데브로그성 잡음은 바닥으로 가라앉고,
+            -- 출시·연기처럼 점수가 높은 소식은 표시를 달고도 살아남는다.
+            - CASE WHEN COALESCE(x.is_marketing_noise, 0) = 1 THEN 30 ELSE 0 END
         ) DESC, e.published_at DESC
         LIMIT ? OFFSET ?
         """.trimIndent(),

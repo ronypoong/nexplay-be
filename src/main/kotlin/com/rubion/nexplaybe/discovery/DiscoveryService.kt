@@ -112,13 +112,19 @@ class DiscoveryService(
             .minusDays(days.coerceIn(1, 365).toLong())
         val byType = eventRepository.findByTypesSince(PLAYTEST_TYPES, since)
         // 모델이 체험판이라고 표시한 소식. id 로만 다시 집어 오므로 전체를 훑지 않는다.
-        val flaggedIds = insights.filterValues { it.hasDemo }.keys - byType.map { it.id }.toSet()
+        //
+        // 이쪽은 "본문에 데모라는 말이 있다" 수준의 느슨한 신호라 홍보성 표시가
+        // 붙은 것은 뺀다. 반대로 종류 자체가 DEMO/BETA 로 나온 byType 은 남긴다 —
+        // 데모의 32% 에 홍보성 표시가 붙어 있어서, 그것까지 빼면 "v0.6.1 Demo out
+        // now!" 나 "ToT Demo Launch Date" 같은 진짜 체험판 소식 52건이 사라진다.
+        // 이 화면이 있는 이유가 그 52건이다.
+        val flaggedIds = insights.filterValues { it.hasDemo && !it.marketingNoise }.keys -
+            byType.map { it.id }.toSet()
         val flagged = if (flaggedIds.isEmpty()) emptyList() else eventRepository.findFeedEventsByIds(flaggedIds)
         return (byType + flagged)
             .asSequence()
             .distinctBy { it.id }
             .filter { it.eventDate >= since }
-            .filterNot { insights[it.id]?.marketingNoise == true }
             // 발표 시각까지 보고 세운다. 날짜만 쓰면 같은 날 것들의 순서가 매번 달라진다.
             .sortedByDescending { it.publishedAt }
             .map { it.toResponse(clock, insights[it.id]) }
