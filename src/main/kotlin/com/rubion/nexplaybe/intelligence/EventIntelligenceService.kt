@@ -58,6 +58,21 @@ class EventIntelligenceService(
             -- 정작 홈에 올라갈 출시 발표는 뒤로 밀린다. 미분류가 3,222건이고 그중
             -- 1,183건이 패치노트라, 최신순으로 돌리면 같은 돈을 쓰고도 화면은
             -- 그대로다.
+            --
+            -- 그 반대로도 틀릴 수 있다는 것을 뒤늦게 알았다. 나이 감점이 60일에서
+            -- 멈추고 절반으로 깎여 최대 -30 이었다. 종류 점수의 폭은 84(16~100)라
+            -- 감점이 그것을 이길 수 없었다. 석 달 지난 RELEASE_DATE 가
+            -- 100+16-30=86 으로, 오늘 올라온 ANNOUNCEMENT 의 44+16=60 을 이겼다.
+            --
+            -- 최근 7일 미분류 207건 중 163건이 ANNOUNCEMENT 다. 신작 소식은
+            -- 대부분 이 종류로 들어오는데, 종류 점수는 패치 다음으로 낮다.
+            -- 그래서 오늘 소식이 구조적으로 계속 밀렸다. 08-30 실행은 31건 중
+            -- 9건이 석 달 넘은 소식이었고, 그날 예산의 29%가 거기로 갔다.
+            --
+            -- 하루에 1점씩, 1년까지 깎는다. 종류 점수의 폭이 84 이므로 "종류가
+            -- 한 단계 위인 소식은 84일까지는 더 오래됐어도 이긴다" 는 뜻이 된다.
+            -- 출시일 확정은 3주 지나도 오늘의 잡담보다 매거진감이지만, 두 달이
+            -- 지나면 아니다. 그 선이 여기다.
             ORDER BY (
                 CASE e.type
                     WHEN 'RELEASE_DATE' THEN 100 WHEN 'DELAY' THEN 100 WHEN 'RELEASE' THEN 95
@@ -67,7 +82,7 @@ class EventIntelligenceService(
                     WHEN 'ANNOUNCEMENT' THEN 44 WHEN 'PATCH' THEN 16 ELSE 40
                 END
                 + g.discovery_score / 5
-                - LEAST(GREATEST(DATEDIFF(CURRENT_DATE, e.event_date), 0), 60) / 2
+                - LEAST(GREATEST(DATEDIFF(CURRENT_DATE, e.event_date), 0), 365)
             ) DESC, e.published_at DESC
             LIMIT ${limit.coerceIn(1, MAX_LIMIT)}
             """.trimIndent(),
