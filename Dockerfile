@@ -42,6 +42,18 @@ ENV TZ=Asia/Seoul
 #
 # 메타스페이스 상한: 안 잡으면 무제한이라, 새는 곳이 있을 때 힙이 아니라
 # 컨테이너가 통째로 OOM 으로 죽는다. 원인을 찾기 가장 어려운 형태다.
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=65 -XX:+UseSerialGC -XX:MaxMetaspaceSize=192m -Xss512k -XX:+ExitOnOutOfMemoryError"
+# 상한(65%)은 그대로 둔다. 줄여야 하는 것은 죽지 않을 여유가 아니라, 한 번
+# 커진 뒤 돌려주지 않는 버릇이다.
+#
+# 실측: 살아 있는 데이터는 56MB 인데(캐시를 다 채워도 같다) 힙은 245MB 까지
+# 부풀어 있었다. 늘어난 만큼은 요청을 처리하며 생긴 쓰레기였고, 회수된 뒤에도
+# 컨테이너에는 계속 잡혀 있었다.
+#
+# Initial 8%: 처음부터 크게 잡지 않는다. 필요하면 늘리면 된다.
+# MaxHeapFreeRatio 30: 남는 공간이 30%를 넘으면 힙을 줄여 OS 에 돌려준다.
+#   기본값 70 은 "일곱 칸이 빌 때까지" 안 줄인다는 뜻이라 사실상 안 줄어든다.
+# ShrinkHeapInSteps 끔: 줄일 때 여러 번에 나눠 조금씩 말고 한 번에 줄인다.
+#   하루 한 번 몰아치고 나머지는 노는 부하라 나눠 줄일 이유가 없다.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=65 -XX:InitialRAMPercentage=8 -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=30 -XX:-ShrinkHeapInSteps -XX:+UseSerialGC -XX:MaxMetaspaceSize=192m -Xss512k -XX:+ExitOnOutOfMemoryError"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
