@@ -17,6 +17,7 @@ import com.rubion.nexplaybe.catalog.ClassificationEnrichmentSummary
 import com.rubion.nexplaybe.collector.CollectorSummary
 import com.rubion.nexplaybe.metadata.RichMetadataSyncSummary
 import com.rubion.nexplaybe.wikipedia.WikipediaDescriptionService
+import com.rubion.nexplaybe.discovery.FeedScoreService
 import com.rubion.nexplaybe.wikipedia.WikipediaSyncSummary
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
@@ -34,6 +35,7 @@ class DailyContentSyncScheduler(
     private val gameAwardService: GameAwardService,
     private val eventIntelligenceService: EventIntelligenceService,
     private val promiseLedgerService: PromiseLedgerService,
+    private val feedScoreService: FeedScoreService,
     private val readCacheEvictor: ReadCacheEvictor,
     private val syncRunRecorder: SyncRunRecorder,
     private val voterHashRetention: VoterHashRetention,
@@ -71,6 +73,10 @@ class DailyContentSyncScheduler(
         val resolutions = step("promise-resolution", ResolutionSummary(0, 0, 0, 0, 0)) { promiseLedgerService.resolve() }
         // 처리방침에 적은 기간을 코드가 실제로 지키게 한다.
         step("voter-hash-retention", 0) { voterHashRetention.anonymizeOldHashes() }
+        // 목록 정렬 점수를 다시 적는다. 오늘 들어온 소식과 방금 붙은 분류가
+        // 여기서 순위에 반영된다. 반드시 수집·분류 뒤여야 한다 — 앞에 두면
+        // 오늘 들어온 소식이 점수 없이 남아 목록에서 빠진다.
+        step("feed-score", 0) { feedScoreService.recompute() }
         // 오늘치가 다 들어왔으니 어제 계산해 둔 목록은 버린다.
         readCacheEvictor.evictQuietly()
         log.info(

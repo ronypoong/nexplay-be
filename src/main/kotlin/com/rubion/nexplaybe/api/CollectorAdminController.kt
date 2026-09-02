@@ -50,6 +50,7 @@ class CollectorAdminController(
     private val gameAwardService: GameAwardService,
     private val eventIntelligenceService: EventIntelligenceService,
     private val promiseLedgerService: PromiseLedgerService,
+    private val feedScoreService: com.rubion.nexplaybe.discovery.FeedScoreService,
     private val readCacheEvictor: ReadCacheEvictor,
     private val rawPayloadBackfill: RawPayloadBackfill,
     private val llmCostService: com.rubion.nexplaybe.intelligence.LlmCostService,
@@ -57,7 +58,7 @@ class CollectorAdminController(
     /** 수집한 뉴스를 모델이 읽고 분류·구조화한다. 키가 없으면 SKIPPED 를 돌려준다. */
     @PostMapping("/events/extract")
     fun extractEvents(@RequestParam(defaultValue = "100") limit: Int) =
-        eventIntelligenceService.extract(limit)
+        eventIntelligenceService.extract(limit).also { feedScoreService.recompute() }
 
     /**
      * 본문이 빈 채로 저장된 소식의 원문을 피드에서 되받아 채운다.
@@ -93,8 +94,11 @@ class CollectorAdminController(
     @DeleteMapping("/editor-picks/{slug}")
     fun removeEditorPick(@PathVariable slug: String) = mapOf("removed" to editorPickService.remove(slug))
 
+    // 점수를 다시 적지 않으면 방금 들어온 소식이 feed_score 없이 남아 목록에서
+    // 빠진다. 일일 동기화는 마지막에 한 번 돌리지만, 여기는 손으로 부르는 자리라
+    // 각자 뒤처리를 해야 한다.
     @PostMapping("/collectors/steam/run")
-    fun runSteamCollector() = steamNewsCollector.collect()
+    fun runSteamCollector() = steamNewsCollector.collect().also { feedScoreService.recompute() }
 
     @PostMapping("/catalog/wikidata/sync")
     fun syncCatalog(@RequestParam(required = false) year: Int?) = catalogSyncService.sync(year ?: java.time.LocalDate.now().year)

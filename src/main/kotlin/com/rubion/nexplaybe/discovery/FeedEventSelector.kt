@@ -29,52 +29,28 @@ data class FeedEventStats(
 @Component
 class FeedEventSelector(private val jdbc: JdbcTemplate) {
 
+    /**
+     * 점수는 [FeedScoreService] 가 하루 한 번 적어 둔다. 여기서는 읽기만 한다.
+     *
+     * 예전에는 이 자리에서 계산했다. 계산 결과가 저장돼 있지 않으니 인덱스가 탈
+     * 수 없었고, 30건을 돌려주려고 11,305행을 전부 읽어 점수를 매기고 전부
+     * 정렬한 뒤 11,275행을 버렸다. 캐시가 10분마다 비니 하루에 백 번 넘게
+     * 그 값을 치렀고, 소식이 하루 60건씩 쌓이므로 계속 비싸질 참이었다.
+     *
+     * 점수의 재료가 모두 하루 한 번만 바뀌어서 미리 적어 둘 수 있었다.
+     * 종류는 고정이고, discovery_score 는 동기화 때, 요약과 홍보성 표시는
+     * 분류될 때, 날짜 감점은 하루가 지나면서 바뀐다.
+     *
+     * feed_score 가 NULL 이면 목록에 내보내지 않는다는 뜻이다(archive_only 인
+     * 게임의 소식). 그 판단까지 점수에 담았으므로 game 을 조인할 필요가 없다.
+     * 인덱스가 정렬 순서 그대로 만들어져 있어 앞에서 필요한 만큼만 읽고 멈춘다.
+     */
     fun topEventIds(limit: Int, offset: Int = 0): List<Long> = jdbc.queryForList(
         """
         SELECT e.id
         FROM game_event e
-        JOIN game g ON g.id = e.game_id
-        LEFT JOIN game_event_extraction x ON x.event_id = e.id AND x.prompt_version = 1
-        WHERE g.archive_only = 0
-        ORDER BY (
-            CASE COALESCE(NULLIF(x.event_type, ''), e.type)
-                WHEN 'RELEASE_DATE'  THEN 100
-                WHEN 'DELAY'         THEN 100
-                WHEN 'RELEASE'       THEN  95
-                WHEN 'EXPANSION'     THEN  80
-                WHEN 'DLC'           THEN  75
-                WHEN 'DEMO'          THEN  72
-                WHEN 'TRAILER'       THEN  70
-                WHEN 'GAMEPLAY'      THEN  70
-                WHEN 'BETA'          THEN  64
-                WHEN 'PREORDER'      THEN  60
-                WHEN 'DISCOUNT'      THEN  56
-                WHEN 'MAJOR_UPDATE'  THEN  52
-                WHEN 'ANNOUNCEMENT'  THEN  44
-                WHEN 'PATCH'         THEN  16
-                ELSE 40
-            END
-            + g.discovery_score / 5
-            -- 한국어로 설명할 수 있는 소식을 앞세운다. 영어 제목만 남는 카드는
-            -- 한국 사용자에게 아무것도 전달하지 못한다.
-            + CASE WHEN x.summary_ko IS NOT NULL AND x.summary_ko <> '' THEN 18 ELSE 0 END
-            -- 오래될수록 내린다. 60일이 지나면 더 내리지 않는다 — 그 아래로는
-            -- 종류와 중요도가 날짜보다 낫다.
-            - LEAST(GREATEST(DATEDIFF(CURRENT_DATE, e.event_date), 0), 60) / 2
-            -- 홍보성 표시는 내리는 이유지 지우는 이유가 아니다.
-            --
-            -- 여기서 통째로 걸러내고 있었다. 그런데 모델이 붙이는 이 표시는
-            -- 할인·데모처럼 원래 홍보의 얼굴을 한 소식에도 붙는다. 실제로
-            -- 할인의 47%, 데모의 32% 가 이 표시를 달았고, 그렇게 접힌 소식이
-            -- 268건이다. "Kusan: City of Wolves Is Out Now!" 같은 출시 소식도
-            -- 그 안에 있었다.
-            --
-            -- 분류 프롬프트는 "지우지는 않고 표시만 합니다" 라고 적혀 있고
-            -- 화면에도 '홍보성' 배지가 이미 있다. 소비하는 쪽만 그 약속을
-            -- 어기고 있었다. -30 이면 데브로그성 잡음은 바닥으로 가라앉고,
-            -- 출시·연기처럼 점수가 높은 소식은 표시를 달고도 살아남는다.
-            - CASE WHEN COALESCE(x.is_marketing_noise, 0) = 1 THEN 30 ELSE 0 END
-        ) DESC, e.published_at DESC
+        WHERE e.feed_score IS NOT NULL
+        ORDER BY e.feed_score DESC, e.published_at DESC
         LIMIT ? OFFSET ?
         """.trimIndent(),
         Long::class.java,
