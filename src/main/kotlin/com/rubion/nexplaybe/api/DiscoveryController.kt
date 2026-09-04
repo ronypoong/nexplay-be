@@ -35,6 +35,7 @@ class DiscoveryController(
     private val trendService: TrendService,
     private val gameAwardService: GameAwardService,
     private val promiseQueryService: PromiseQueryService,
+    private val dealService: com.rubion.nexplaybe.deals.DealService,
     private val syncStatusService: SyncStatusService,
     private val anticipationService: AnticipationService,
     private val audienceService: AudienceService,
@@ -88,6 +89,10 @@ class DiscoveryController(
      * 공개로 둔다. 언제 갱신됐는지는 데이터 서비스에서 신뢰의 근거이고,
      * 여기에 비밀은 없다.
      */
+    /** 지금 할인 중인 게임. 기간이 끝나면 사라지므로 언제 본 값인지를 함께 내보낸다. */
+    @GetMapping("/deals")
+    fun deals(@RequestParam(defaultValue = "60") limit: Int) = dealService.deals(limit)
+
     @GetMapping("/status")
     fun status() = syncStatusService.status()
 
