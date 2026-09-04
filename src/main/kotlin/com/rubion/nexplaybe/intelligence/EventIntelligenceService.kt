@@ -28,6 +28,7 @@ class EventIntelligenceService(
     private val transactions: TransactionTemplate,
     private val extractor: OpenAiExtractor,
     @param:Value("\${nexplay.intelligence.max-body-chars:1200}") private val maxBodyChars: Int,
+    @param:Value("\${nexplay.intelligence.max-event-age-days:60}") private val maxEventAgeDays: Int,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val model: String get() = extractor.model
@@ -51,6 +52,20 @@ class EventIntelligenceService(
               -- 패치노트가 전체의 36% 다. 대부분 "1.2.3 이 배포됐다" 라 한국어 요약을
               -- 얻어도 값이 작고, 홈에서도 맨 뒤로 밀린다. 눈여겨보는 게임의 패치만 묻는다.
               AND NOT (e.type = 'PATCH' AND g.discovery_score < ?)
+              -- 오래된 것은 분류해도 화면에 나오지 않으므로 후보에서 뺀다.
+              --
+              -- feed_score 상위 30건(홈)의 최대 나이가 22일, 상위 100건이 50일이다.
+              -- 60일이 넘는 것이 화면에 닿으려면 300위권까지 내려가야 한다.
+              -- 피드 점수도 나이 감점을 60일에서 멈추므로, 그 뒤로는 무엇을
+              -- 분류하든 순서가 달라지지 않는다. 자를 자리가 여기다.
+              --
+              -- 다만 이건 지금 무언가를 고치는 조건이 아니라 방지선이다. 위의
+              -- 정렬식이 이미 하루 1점씩 깎고 있어서, 8/31 이후로 60일 넘은
+              -- 소식이 뽑힌 적은 하루도 없다(닷새 실측 0건). 정렬 가중치를
+              -- 나중에 손댔을 때 조용히 새는 것을 막으려고 조건으로 못 박는다.
+              --
+              -- 밀린 것을 일부러 소화할 거라면 이 값을 크게 줘서 그날만 돌린다.
+              AND e.event_date >= DATE_SUB(CURRENT_DATE, INTERVAL ? DAY)
             GROUP BY e.id, e.title, body, g.title, e.type, e.event_date, g.discovery_score
             -- 홈이 실제로 쓰는 순서대로 분류한다.
             --
@@ -87,7 +102,7 @@ class EventIntelligenceService(
             LIMIT ${limit.coerceIn(1, MAX_LIMIT)}
             """.trimIndent(),
             { rs, _ -> Candidate(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)) },
-            PROMPT_VERSION, PATCH_MIN_SCORE,
+            PROMPT_VERSION, PATCH_MIN_SCORE, maxEventAgeDays,
         )
         if (candidates.isEmpty()) return ExtractionSummary("SUCCESS", 0, 0, 0)
 
