@@ -134,6 +134,10 @@ class DiscoveryController(
     @GetMapping("/korean")
     fun koreanRadar() = koreanSupportService.radar()
 
+    /** 한국어 지원이 새로 잡힌 게임. 붙은 것(ADDED)과 처음 확인한 것(CONFIRMED)을 구분해 준다. */
+    @GetMapping("/korean/recent")
+    fun koreanRecent(@RequestParam(defaultValue = "60") limit: Int) = koreanSupportService.recentlySupported(limit)
+
     @GetMapping("/feed")
     fun feed() = discoveryService.feed()
 

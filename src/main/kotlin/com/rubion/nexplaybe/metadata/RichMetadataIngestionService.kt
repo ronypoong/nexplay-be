@@ -14,6 +14,10 @@ import java.time.Instant
 
 data class RichMetadataSyncSummary(val status: String, val candidates: Int, val enriched: Int, val failed: Int)
 
+/** Steam 이 연속으로 거절해 한 건도 못 받아 온 경우. 조용히 넘기면 안 되는 상태다. */
+class SteamSourceUnavailableException(candidates: Int) :
+    RuntimeException("Steam appdetails 가 연속 거절했다. 후보 ${candidates}건 중 0건 수집")
+
 @Service
 class RichMetadataIngestionService(
     private val gameRepository: GameRepository,
@@ -75,7 +79,12 @@ class RichMetadataIngestionService(
             enriched++
         }
         if (enriched == 0 && consecutiveFailures >= STEAM_FAILURE_CUTOFF) {
-            return RichMetadataSyncSummary("SKIPPED_SOURCE_UNAVAILABLE", candidates.size, 0, candidates.size)
+            // 예전에는 요약만 SKIPPED_SOURCE_UNAVAILABLE 로 돌려보냈다. 단계 자체는
+            // 예외를 던지지 않았으니 SyncRunRecorder 가 SUCCESS 로 적었고, 상태
+            // 화면에도 초록불이 떴다. 그래서 2026-09-06 부터 이 단계가 하루도
+            // 성공하지 못했는데 23일을 아무도 몰랐다. 한 건도 못 받아 왔으면
+            // 그건 성공이 아니다 — 던져서 FAILED 로 남긴다.
+            throw SteamSourceUnavailableException(candidates.size)
         }
         return RichMetadataSyncSummary("SUCCESS", candidates.size, enriched, candidates.size - enriched)
     }
@@ -272,10 +281,16 @@ class RichMetadataIngestionService(
     private companion object {
         const val STEAM_FAILURE_CUTOFF = 5
         // 하루 12건이면 남은 400여 건을 채우는 데 한 달이 걸린다.
-        const val DEFAULT_ENRICH_LIMIT = 200
+        //
+        // 200건에서 100건으로 내렸다. 카탈로그가 2,337개로 커져서 한 바퀴가
+        // 23일이 되지만, 한 바퀴를 빨리 도는 것보다 매일 도는 쪽이 낫다.
+        const val DEFAULT_ENRICH_LIMIT = 100
         const val MAX_ENRICH_LIMIT = 500
         // Steam appdetails 는 IP 당 5분에 200건 언저리에서 막는다.
-        // 300ms 로 돌렸더니 200건 중 197건이 차단됐다. 한 건당 1.5초면 그 한도 안에 들어간다.
-        const val REQUEST_INTERVAL_MS = 1_500L
+        //
+        // 1.5초는 5분에 정확히 200건 — 한도의 경계선이다. 경계선에 붙여 두면
+        // Steam 이 조금만 조여도 첫 다섯 건에서 끊긴다. 게임 한 건이 kr/us 두 번을
+        // 부르니 실제로는 이미 한도의 두 배를 쓰고 있었다. 3초면 절반으로 내려간다.
+        const val REQUEST_INTERVAL_MS = 3_000L
     }
 }

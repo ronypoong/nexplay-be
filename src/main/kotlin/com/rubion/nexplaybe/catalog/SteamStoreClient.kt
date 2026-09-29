@@ -1,6 +1,7 @@
 package com.rubion.nexplaybe.catalog
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import java.net.URI
@@ -46,6 +47,7 @@ data class SteamAgeRating(val system: String, val rating: String, val descriptor
 class SteamStoreClient(
     @Value("\${nexplay.catalog.steam-store.timeout-seconds:12}") timeoutSeconds: Long,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
     private val timeout = Duration.ofSeconds(timeoutSeconds)
     private val httpClient = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val objectMapper = jacksonObjectMapper()
@@ -71,7 +73,13 @@ class SteamStoreClient(
             .GET()
             .build()
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        if (response.statusCode() !in 200..299) return null
+        // 예전에는 상태 코드를 그냥 삼켰다. 2026-09-06 부터 이 호출이 매일 전부
+        // 실패했는데, 차단(403)인지 한도 초과(429)인지 시간 초과인지 알 길이
+        // 없어서 3주를 모르고 지났다. 무엇이 막았는지는 남겨야 고칠 수 있다.
+        if (response.statusCode() !in 200..299) {
+            log.warn("Steam appdetails 거절: appId={} cc={} status={}", appId, country, response.statusCode())
+            return null
+        }
         val result = objectMapper.readTree(response.body()).path(appId.toString())
         if (!result.path("success").asBoolean(false)) return null
         val data = result.path("data")
