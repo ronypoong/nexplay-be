@@ -91,6 +91,13 @@ data class EventGameRef(
     val accent: String,
     val accent2: String,
     val symbol: String,
+    /**
+     * 데모 목록에서 "한국어 되는 것만" 을 고를 수 있어야 한다. 넥스트 페스트 주간에
+     * 수백 개가 쏟아지는데 한국 사람이 제일 먼저 거르는 조건이 이것이다.
+     * 소식 카드에서는 쓰지 않으니 없으면 없는 대로 둔다.
+     */
+    val koreanTextSupported: Boolean? = null,
+    val koreanAudioSupported: Boolean? = null,
 )
 
 data class ReleaseResponse(
@@ -187,6 +194,7 @@ fun GameEvent.toResponse(
         game = EventGameRef(
             game.slug, game.title, game.developer.name, game.coverImageUrl,
             game.accent, game.accentSecondary, game.symbol,
+            game.koreanTextSupported, game.koreanAudioSupported,
         ),
         summaryKo = insight?.summaryKo,
         hasDemo = insight?.hasDemo ?: false,

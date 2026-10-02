@@ -32,6 +32,7 @@ class DiscoveryController(
     private val metadataService: ExtendedGameMetadataService,
     private val editorPickService: EditorPickService,
     private val koreanSupportService: KoreanSupportService,
+    private val accessibilityService: com.rubion.nexplaybe.metadata.AccessibilityService,
     private val trendService: TrendService,
     private val gameAwardService: GameAwardService,
     private val promiseQueryService: PromiseQueryService,
@@ -137,6 +138,10 @@ class DiscoveryController(
     /** 한국어 지원이 새로 잡힌 게임. 붙은 것(ADDED)과 처음 확인한 것(CONFIRMED)을 구분해 준다. */
     @GetMapping("/korean/recent")
     fun koreanRecent(@RequestParam(defaultValue = "60") limit: Int) = koreanSupportService.recentlySupported(limit)
+
+    /** 접근성 기능별 게임. 난이도 조정·색상 대체·자막 옵션 같은 것으로 찾는 길이 없었다. */
+    @GetMapping("/accessibility")
+    fun accessibility() = accessibilityService.overview()
 
     @GetMapping("/feed")
     fun feed() = discoveryService.feed()
