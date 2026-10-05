@@ -65,13 +65,33 @@ class RichMetadataIngestionService(
 
         // DLC 연결에 쓰는 appId -> 게임 대응표. 예전에는 게임 1건마다 카탈로그 전체를 다시 읽었다.
         val bySteamAppId = steamGameRefs()
-        // Steam 이 실제로 죽었을 때만 중단한다. 특정 앱 하나가 지역 제한이나 삭제 상태여도 나머지는 계속 진행한다.
+        /*
+         * 예전에는 연속 5회 실패하면 그날 작업을 통째로 접었다. 그게 2026-09-06
+         * 이후 매일 0건으로 끝난 진짜 이유였다 — 손으로 5건을 돌려 보니 2건이
+         * 들어왔고, 그 직후부터는 계속 거절당했다. Steam 쪽 속도 제한이고,
+         * Railway 처럼 여러 손님이 나눠 쓰는 주소에서는 남는 몫이 들쭉날쭉하다.
+         *
+         * 창이 열렸다 닫혔다 하는 상대에게 "다섯 번 연달아 거절당하면 포기" 는
+         * 최악의 전략이다. 거절당하면 더 기다렸다가 계속 두드린다. 하루에 열 건을
+         * 건져도 접는 것보다는 낫다.
+         *
+         * 아주 오래 아무것도 못 받으면 그때는 멈춘다 — 상대가 정말 죽었을 때
+         * 5분을 허비할 이유는 없다.
+         */
         var consecutiveFailures = 0
         var enriched = 0
+        // 백오프가 붙으면 한 번 도는 데 걸리는 시간이 들쭉날쭉해진다. 하루 한 번
+        // 도는 일이라도 끝은 있어야 하므로 벽시계로 끊는다.
+        val deadline = System.currentTimeMillis() + MAX_RUN_MILLIS
         for ((index, game) in candidates.withIndex()) {
-            if (consecutiveFailures >= STEAM_FAILURE_CUTOFF) break
-            // 한 번에 수백 건을 훑으므로 Steam 에 예의를 지킨다.
-            if (index > 0) runCatching { Thread.sleep(REQUEST_INTERVAL_MS) }
+            if (consecutiveFailures >= STEAM_GIVE_UP_STREAK) break
+            if (System.currentTimeMillis() > deadline) break
+            // 한 번에 수백 건을 훑으므로 Steam 에 예의를 지킨다. 거절당한 직후에는
+            // 더 길게 쉰다 — 같은 속도로 계속 두드리면 창이 영영 열리지 않는다.
+            if (index > 0) {
+                val pause = if (consecutiveFailures > 0) BACKOFF_INTERVAL_MS else REQUEST_INTERVAL_MS
+                runCatching { Thread.sleep(pause) }
+            }
             val metadata = runCatching { steam.fetchDetails(requireNotNull(game.steamAppId)) }.getOrNull()
             if (metadata == null) {
                 consecutiveFailures++
@@ -83,7 +103,7 @@ class RichMetadataIngestionService(
             transactions.execute { persistSteamMetadata(game, metadata, bySteamAppId) }
             enriched++
         }
-        if (enriched == 0 && consecutiveFailures >= STEAM_FAILURE_CUTOFF) {
+        if (enriched == 0) {
             // 예전에는 요약만 SKIPPED_SOURCE_UNAVAILABLE 로 돌려보냈다. 단계 자체는
             // 예외를 던지지 않았으니 SyncRunRecorder 가 SUCCESS 로 적었고, 상태
             // 화면에도 초록불이 떴다. 그래서 2026-09-06 부터 이 단계가 하루도
@@ -284,7 +304,14 @@ class RichMetadataIngestionService(
     }
 
     private companion object {
-        const val STEAM_FAILURE_CUTOFF = 5
+        /*
+         * 몇 번 연달아 거절당하면 그날을 접는가.
+         *
+         * 5였다. 창이 열렸다 닫혔다 하는 상대에게는 너무 짧아서, 창이 닫힌
+         * 순간에 걸리면 한 건도 못 건지고 끝났다. 20이면 백오프까지 쳐서
+         * 5분쯤 버틴다 — 그 사이 창이 한 번은 열린다.
+         */
+        const val STEAM_GIVE_UP_STREAK = 20
         // 하루 12건이면 남은 400여 건을 채우는 데 한 달이 걸린다.
         //
         // 200건에서 100건으로 내렸다. 카탈로그가 2,337개로 커져서 한 바퀴가
@@ -297,5 +324,9 @@ class RichMetadataIngestionService(
         // Steam 이 조금만 조여도 첫 다섯 건에서 끊긴다. 게임 한 건이 kr/us 두 번을
         // 부르니 실제로는 이미 한도의 두 배를 쓰고 있었다. 3초면 절반으로 내려간다.
         const val REQUEST_INTERVAL_MS = 3_000L
+        // 거절당한 뒤에 쉬는 시간. 같은 속도로 계속 두드리면 창이 영영 안 열린다.
+        const val BACKOFF_INTERVAL_MS = 15_000L
+        // 한 번 도는 데 쓸 수 있는 시간. 백오프가 붙으면 길어지므로 끝을 정해 둔다.
+        const val MAX_RUN_MILLIS = 10 * 60 * 1000L
     }
 }
