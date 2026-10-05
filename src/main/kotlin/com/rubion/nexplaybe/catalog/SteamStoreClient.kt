@@ -48,6 +48,18 @@ class SteamStoreClient(
     @Value("\${nexplay.catalog.steam-store.timeout-seconds:12}") timeoutSeconds: Long,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
+
+    /**
+     * 마지막으로 거절당한 이유.
+     *
+     * 로그에만 남기면 Railway 콘솔을 열어야 보인다. 그걸 못 보는 동안 이 호출이
+     * 23일을 매일 실패했다. 차단(403)인지 한도 초과(429)인지 시간 초과인지에 따라
+     * 손쓸 방법이 완전히 다르므로, 동기화 상태 화면까지 들고 올라가게 둔다.
+     */
+    // Spring 이 @Component 를 프록시로 열어 두기 때문에 private set 을 붙일 수 없다.
+    @Volatile
+    var lastRejection: String? = null
+
     private val timeout = Duration.ofSeconds(timeoutSeconds)
     private val httpClient = HttpClient.newBuilder().connectTimeout(timeout).build()
     private val objectMapper = jacksonObjectMapper()
@@ -61,7 +73,11 @@ class SteamStoreClient(
      * 게임 11개 중 9개가 이 경우였다.
      */
     fun fetchDetails(appId: Long): SteamStoreMetadata? =
-        fetchDetails(appId, "kr") ?: fetchDetails(appId, "us")
+        // 연결 자체가 끊기는 것도 거절만큼 중요한 단서다. runCatching 으로 삼키면
+        // 부르는 쪽에는 "null" 만 남아 원인을 가릴 수 없다.
+        runCatching { fetchDetails(appId, "kr") ?: fetchDetails(appId, "us") }
+            .onFailure { lastRejection = "${it.javaClass.simpleName}: ${it.message?.take(120)}" }
+            .getOrNull()
 
     private fun fetchDetails(appId: Long, country: String): SteamStoreMetadata? {
         val request = HttpRequest.newBuilder(
@@ -78,6 +94,7 @@ class SteamStoreClient(
         // 없어서 3주를 모르고 지났다. 무엇이 막았는지는 남겨야 고칠 수 있다.
         if (response.statusCode() !in 200..299) {
             log.warn("Steam appdetails 거절: appId={} cc={} status={}", appId, country, response.statusCode())
+            lastRejection = "HTTP ${response.statusCode()} (cc=$country)"
             return null
         }
         val result = objectMapper.readTree(response.body()).path(appId.toString())

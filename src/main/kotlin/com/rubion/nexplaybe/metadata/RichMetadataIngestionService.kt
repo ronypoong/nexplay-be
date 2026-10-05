@@ -14,9 +14,14 @@ import java.time.Instant
 
 data class RichMetadataSyncSummary(val status: String, val candidates: Int, val enriched: Int, val failed: Int)
 
-/** Steam 이 연속으로 거절해 한 건도 못 받아 온 경우. 조용히 넘기면 안 되는 상태다. */
-class SteamSourceUnavailableException(candidates: Int) :
-    RuntimeException("Steam appdetails 가 연속 거절했다. 후보 ${candidates}건 중 0건 수집")
+/**
+ * Steam 이 연속으로 거절해 한 건도 못 받아 온 경우. 조용히 넘기면 안 되는 상태다.
+ *
+ * 거절 사유를 메시지에 박는다. 이 문장은 sync_run 에 남아 /api/v1/status 로
+ * 나가므로, Railway 로그를 열지 않고도 403 인지 429 인지 시간 초과인지 알 수 있다.
+ */
+class SteamSourceUnavailableException(candidates: Int, reason: String?) :
+    RuntimeException("Steam appdetails 가 연속 거절했다. 후보 ${candidates}건 중 0건 수집. 마지막 사유: ${reason ?: "알 수 없음"}")
 
 @Service
 class RichMetadataIngestionService(
@@ -84,7 +89,7 @@ class RichMetadataIngestionService(
             // 화면에도 초록불이 떴다. 그래서 2026-09-06 부터 이 단계가 하루도
             // 성공하지 못했는데 23일을 아무도 몰랐다. 한 건도 못 받아 왔으면
             // 그건 성공이 아니다 — 던져서 FAILED 로 남긴다.
-            throw SteamSourceUnavailableException(candidates.size)
+            throw SteamSourceUnavailableException(candidates.size, steam.lastRejection)
         }
         return RichMetadataSyncSummary("SUCCESS", candidates.size, enriched, candidates.size - enriched)
     }
