@@ -192,7 +192,57 @@ class KoreanSupportService(private val jdbc: JdbcTemplate) {
         limit.coerceIn(1, MAX_RECENT_LIMIT),
     )
 
+    /**
+     * 게임 하나의 한국어 확률.
+     *
+     * 레이더 화면이 상위 24개만 묶어서 내주고 있었다. 정작 "이 게임 한국어 나와요?"
+     * 를 묻는 사람은 그 게임의 상세 화면에 서 있는데, 거기에는 숫자가 없었다.
+     *
+     * 이미 확인된 게임에는 확률을 붙이지 않는다. 답이 있는데 짐작을 얹는 것은
+     * 보태는 게 아니라 흐리는 것이다. 표본이 모자란 퍼블리셔도 비워 둔다 —
+     * 한두 편으로 낸 비율은 그 자체가 거짓말이다.
+     */
+    @Cacheable(CacheConfig.SECTIONS, key = "'korean-forecast-' + #slug")
+    fun forecastFor(slug: String): KoreanForecast? {
+        val game = jdbc.query(
+            """
+            SELECT g.slug, g.title, g.release_label, g.status,
+                   g.korean_text_supported IS NOT NULL AS known,
+                   c.name AS publisher
+            FROM game g JOIN company c ON c.id = g.publisher_id
+            WHERE g.slug = ?
+            """.trimIndent(),
+            { rs, _ ->
+                Quint(
+                    rs.getString("slug"), rs.getString("title"), rs.getString("publisher"),
+                    rs.getString("release_label") ?: "", rs.getBoolean("known") || rs.getString("status") != "UPCOMING",
+                )
+            },
+            slug,
+        ).firstOrNull() ?: return null
+        if (game.settled) return null
+
+        val rate = jdbc.query(
+            """
+            SELECT COUNT(*) AS checked, SUM(g.korean_text_supported = b'1') AS supported
+            FROM game g JOIN company c ON c.id = g.publisher_id
+            WHERE c.name = ? AND g.korean_text_supported IS NOT NULL
+            """.trimIndent(),
+            { rs, _ -> rs.getInt("checked") to rs.getInt("supported") },
+            game.publisher,
+        ).firstOrNull() ?: return null
+        val (checked, supported) = rate
+        if (checked < MIN_SAMPLE) return null
+
+        return KoreanForecast(
+            game.slug, game.title, game.publisher, game.releaseLabel, percent(supported, checked),
+            "${game.publisher} 작품 ${checked}개 중 ${supported}개가 한국어를 지원합니다.",
+        )
+    }
+
     private fun percent(part: Int, whole: Int) = if (whole == 0) 0 else Math.round(100.0 * part / whole).toInt()
+
+    private data class Quint(val slug: String, val title: String, val publisher: String, val releaseLabel: String, val settled: Boolean)
 
     private data class Quad(val slug: String, val title: String, val publisher: String, val releaseLabel: String)
 

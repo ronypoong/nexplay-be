@@ -594,7 +594,7 @@ class CatalogSyncService(
         if (ref == null) return Pair(requireNotNull(companyRepository.findBySlug(UNKNOWN_COMPANY_SLUG)), 0)
         ref.wikidataId?.let { companyRepository.findByWikidataId(it) }?.let { return Pair(it, 0) }
         companyRepository.findByNameIgnoreCase(ref.name)?.let { return Pair(it, 0) }
-        var slug = slugify(ref.name)
+        var slug = slugify(ref.name, fallbackPrefix = "company")
         if (companyRepository.findBySlug(slug) != null) slug += "-${ref.wikidataId?.lowercase() ?: ref.name.hashCode().absoluteValue}"
         return Pair(companyRepository.save(Company(slug = slug, name = ref.name, type = type, wikidataId = ref.wikidataId)), 1)
     }
@@ -689,8 +689,19 @@ class CatalogSyncService(
         if (releaseDate.monthValue == 1 && releaseDate.dayOfMonth == 1) releaseDate.year >= today.year
         else releaseDate.isAfter(today)
 
-    private fun slugify(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKD)
-        .lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "game-${value.hashCode().absoluteValue}" }
+    /**
+     * 라틴 문자가 하나도 없는 이름은 슬러그가 통째로 비어 버린다. 그때 쓰는 이름을
+     * 부르는 쪽이 정하게 한다 — 예전에는 회사도 "game-숫자" 를 받아서, 회사 주소가
+     * /companies/game-1577416 처럼 나왔다.
+     *
+     * 이건 보이는 것만 고친 것이다. "닌텐도" 와 "Nintendo" 가 서로 다른 줄로
+     * 들어오는 것 자체는 그대로다 — 이름으로만 맞춰 보기 때문이고, 고치려면 표기
+     * 대응표가 필요하다. 쌓인 중복은 V40 에서 한 번 치웠다.
+     */
+    private fun slugify(value: String, fallbackPrefix: String = "game"): String =
+        Normalizer.normalize(value, Normalizer.Form.NFKD)
+            .lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+            .ifBlank { "$fallbackPrefix-${value.hashCode().absoluteValue}" }
 
     private fun colorsFor(seed: String): Pair<String, String> {
         val palettes = listOf(

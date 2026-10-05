@@ -17,6 +17,8 @@ data class GameDetailResponse(
     val events: List<GameEventResponse>,
     val promises: List<PromiseRow>,
     val related: List<GameCardResponse>,
+    /** 미출시작의 한국어 확률과 근거. 이미 확인된 게임이면 null 이다. */
+    val koreanForecast: com.rubion.nexplaybe.korean.KoreanForecast? = null,
 )
 
 /**
@@ -34,6 +36,7 @@ class GameDetailBundle(
     private val discoveryService: DiscoveryService,
     private val metadataService: ExtendedGameMetadataService,
     private val promiseQueryService: PromiseQueryService,
+    private val koreanSupportService: com.rubion.nexplaybe.korean.KoreanSupportService,
 ) {
     @Cacheable(CacheConfig.GAME_DETAIL, key = "'bundle-' + #slug")
     fun of(slug: String): GameDetailResponse = GameDetailResponse(
@@ -43,5 +46,8 @@ class GameDetailBundle(
         // 약속이나 관련 게임이 없다고 상세 화면이 죽으면 안 된다.
         promises = runCatching { promiseQueryService.forGame(slug) }.getOrDefault(emptyList()),
         related = runCatching { discoveryService.related(slug) }.getOrDefault(emptyList()),
+        // "이 게임 한국어 나와요?" 는 미출시작 상세에서 가장 자주 나오는 질문인데
+        // 답이 레이더 화면에만 있었다. 이미 확인된 게임이면 null 로 온다.
+        koreanForecast = runCatching { koreanSupportService.forecastFor(slug) }.getOrNull(),
     )
 }

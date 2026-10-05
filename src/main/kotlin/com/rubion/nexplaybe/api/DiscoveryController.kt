@@ -4,6 +4,7 @@ import com.rubion.nexplaybe.discovery.DiscoveryService
 import com.rubion.nexplaybe.editorial.EditorPickService
 import com.rubion.nexplaybe.intelligence.EventDetailService
 import com.rubion.nexplaybe.intelligence.PromiseQueryService
+import com.rubion.nexplaybe.korean.KoreanForecast
 import com.rubion.nexplaybe.korean.KoreanSupportService
 import com.rubion.nexplaybe.anticipation.AnticipationService
 import com.rubion.nexplaybe.popularity.AudienceService
@@ -14,6 +15,7 @@ import com.rubion.nexplaybe.trends.TrendService
 import jakarta.validation.constraints.Size
 import org.springframework.format.annotation.DateTimeFormat
 import jakarta.servlet.http.HttpServletRequest
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.http.HttpStatus
@@ -142,6 +144,14 @@ class DiscoveryController(
     /** 접근성 기능별 게임. 난이도 조정·색상 대체·자막 옵션 같은 것으로 찾는 길이 없었다. */
     @GetMapping("/accessibility")
     fun accessibility() = accessibilityService.overview()
+
+    /**
+     * 이 게임 한국어 나올까. 퍼블리셔 이력으로 낸 확률과 그 근거.
+     * 이미 확인된 게임이나 표본이 모자란 곳은 204 로 비운다 — 짐작을 얹지 않는다.
+     */
+    @GetMapping("/games/{slug}/korean-forecast")
+    fun koreanForecast(@PathVariable slug: String): ResponseEntity<KoreanForecast> =
+        koreanSupportService.forecastFor(slug)?.let { ResponseEntity.ok(it) } ?: ResponseEntity.noContent().build()
 
     @GetMapping("/feed")
     fun feed() = discoveryService.feed()
