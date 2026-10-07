@@ -39,6 +39,7 @@ class DailyContentSyncScheduler(
     private val readCacheEvictor: ReadCacheEvictor,
     private val syncRunRecorder: SyncRunRecorder,
     private val voterHashRetention: VoterHashRetention,
+    private val snapshotRetention: com.rubion.nexplaybe.popularity.SnapshotRetention,
     @param:Value("\${nexplay.daily-sync.zone:Asia/Seoul}") private val zone: String,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -73,6 +74,8 @@ class DailyContentSyncScheduler(
         val resolutions = step("promise-resolution", ResolutionSummary(0, 0, 0, 0, 0)) { promiseLedgerService.resolve() }
         // 처리방침에 적은 기간을 코드가 실제로 지키게 한다.
         step("voter-hash-retention", 0) { voterHashRetention.anonymizeOldHashes() }
+        // 읽는 쪽이 90일까지만 보는데 쌓이는 쪽은 끝이 없었다. 버퍼 풀을 넘기기 전에 자른다.
+        step("snapshot-retention", 0) { snapshotRetention.purgeOldSnapshots() }
         // 목록 정렬 점수를 다시 적는다. 오늘 들어온 소식과 방금 붙은 분류가
         // 여기서 순위에 반영된다. 반드시 수집·분류 뒤여야 한다 — 앞에 두면
         // 오늘 들어온 소식이 점수 없이 남아 목록에서 빠진다.

@@ -104,17 +104,26 @@ class TrendService(private val jdbc: JdbcTemplate) {
             FROM game g
             JOIN popularity_snapshot latest ON latest.game_id = g.id
               AND latest.snapshot_date = (SELECT MAX(snapshot_date) FROM popularity_snapshot)
+            -- 비교 상대는 일주일 전이다. 예전에는 MIN(snapshot_date), 즉 수집을
+            -- 시작한 첫날과 비교했다. 화면은 "이번 주" 라고 적어 두고 실제로는
+            -- "8월 27일 이후" 를 재고 있었고, 날이 갈수록 그 창이 넓어져 뜻이
+            -- 흐려졌다. 창을 못 박으면 오래된 스냅숏을 지워도 숫자가 흔들리지 않는다.
             JOIN popularity_snapshot oldest ON oldest.game_id = g.id
-              AND oldest.snapshot_date = (SELECT MIN(snapshot_date) FROM popularity_snapshot)
+              AND oldest.snapshot_date = (
+                  SELECT MAX(snapshot_date) FROM popularity_snapshot
+                  WHERE snapshot_date <= (SELECT MAX(snapshot_date) FROM popularity_snapshot) - INTERVAL ? DAY
+              )
             WHERE latest.anticipation_score > oldest.anticipation_score
             ORDER BY (latest.anticipation_score - oldest.anticipation_score) DESC, g.discovery_score DESC
             LIMIT 12
             """.trimIndent(),
-        ) { rs, _ ->
-            val cur = rs.getBigDecimal("cur").toInt()
-            val prev = rs.getBigDecimal("prev").toInt()
-            MomentumEntry(rs.getString("slug"), rs.getString("title"), rs.getString("release_label"), cur, prev, cur - prev)
-        }
+            RowMapper { rs, _ ->
+                val cur = rs.getBigDecimal("cur").toInt()
+                val prev = rs.getBigDecimal("prev").toInt()
+                MomentumEntry(rs.getString("slug"), rs.getString("title"), rs.getString("release_label"), cur, prev, cur - prev)
+            },
+            MOMENTUM_WINDOW_DAYS,
+        )
 
         val changes = jdbc.query(
             """
@@ -228,6 +237,8 @@ class TrendService(private val jdbc: JdbcTemplate) {
     private companion object {
         // 이틀치로 "급상승" 을 말하면 노이즈다. 일주일은 있어야 추세라 부를 수 있다.
         const val MIN_SNAPSHOT_DAYS = 7
+        /** 무엇과 견주는가. 화면이 "이번 주" 라고 적으므로 창도 일주일이어야 한다. */
+        const val MOMENTUM_WINDOW_DAYS = 7
         const val MIN_CHANGES = 1
         /** 하루 이틀 차이는 연기가 아니라 같은 날짜를 다르게 말한 것이다. */
         const val MIN_SHIFT_DAYS = 7
